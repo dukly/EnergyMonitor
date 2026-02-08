@@ -1,0 +1,7 @@
+[2026-02-08 17:10:03] Ошибка чтения FLOAT32 32004 (Мощность AC)
+[2026-02-08 17:10:03] Ошибка чтения INT16 32018 (Статус инвертера)
+[2026-02-08 17:10:03] Исключение FLOAT32 32000 (Напряжение DC):
+Traceback (most recent call last):
+  File "app/json_utils.py", line 42, in read_float32
+    r = client.read_input_registers(address, count=2)
+pymodbus.exceptions.ModbusIOException: Modbus Error: [Input/Output] No Response received
