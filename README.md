@@ -51,4 +51,3 @@
 
 ```bash
 pip install pymodbus
-# -
