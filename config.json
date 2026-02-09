@@ -1,0 +1,7 @@
+{
+    "inverter_ip": "192.168.0.100",
+    "inverter_port": 502,
+    "poll_interval": 5,
+    "log_file": "log.txt",
+    "error_log": "error_log.txt"
+}
