@@ -1,10 +1,33 @@
 import struct
 import traceback
+import time
+import json
 from datetime import datetime
 from pymodbus.client import ModbusTcpClient
 
-INVERTER_IP = "192.168.0.100"
-INVERTER_PORT = 502
+
+def load_config():
+    try:
+        with open("config.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        print("⚠ Ошибка: не удалось загрузить config.json. Используются значения по умолчанию.")
+        return {
+            "inverter_ip": "192.168.0.100",
+            "inverter_port": 502,
+            "poll_interval": 5,
+            "log_file": "log.txt",
+            "error_log": "error_log.txt"
+        }
+
+
+config = load_config()
+
+INVERTER_IP = config["inverter_ip"]
+INVERTER_PORT = config["inverter_port"]
+POLL_INTERVAL = config["poll_interval"]
+LOG_FILE = config["log_file"]
+ERROR_LOG = config["error_log"]
 
 REGISTER_MAP = {
     "Напряжение DC": (32000, "float"),
@@ -38,8 +61,14 @@ ERROR_MAP = {
 
 def log_error(msg):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open("error_log.txt", "a", encoding="utf-8") as f:
+    with open(ERROR_LOG, "a", encoding="utf-8") as f:
         f.write(f"[{timestamp}] {msg}\n")
+
+
+def log_data(lines):
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n\n")
+
 
 def read_float32(client, address, name):
     try:
@@ -51,7 +80,6 @@ def read_float32(client, address, name):
             return "Ошибка чтения"
 
         regs = [r1.registers[0], r2.registers[0]]
-
         raw = struct.pack(">HH", regs[0], regs[1])
         value = struct.unpack(">f", raw)[0]
         return round(value, 2)
@@ -59,6 +87,7 @@ def read_float32(client, address, name):
     except Exception:
         log_error(f"Исключение FLOAT32 {address} ({name}):\n{traceback.format_exc()}")
         return "Исключение"
+
 
 def read_int16(client, address, name):
     try:
@@ -74,17 +103,29 @@ def read_int16(client, address, name):
         log_error(f"Исключение INT16 {address} ({name}):\n{traceback.format_exc()}")
         return "Исключение"
 
-def poll_inverter():
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_lines = [f"[{timestamp}]"]
 
-    try:
+def connect_with_retry():
+    while True:
         client = ModbusTcpClient(INVERTER_IP, port=INVERTER_PORT)
-
-        if not client.connect():
-            log_error("Не удалось подключиться к инвертеру")
-            log_lines.append("Ошибка: нет подключения к инвертеру.")
+        if client.connect():
+            print("✔ Подключение установлено")
+            return client
         else:
+            print("✖ Не удалось подключиться. Повтор через 5 сек...")
+            log_error("Не удалось подключиться к инвертеру")
+            time.sleep(5)
+
+def poll_inverter_loop():
+    client = connect_with_retry()
+
+    while True:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_lines = [f"[{timestamp}]"]
+
+        try:
+            if not client.connect():
+                raise ConnectionError("Потеряна связь с инвертером")
+
             for name, (address, dtype) in REGISTER_MAP.items():
                 if dtype == "float":
                     value = read_float32(client, address, name)
@@ -100,14 +141,18 @@ def poll_inverter():
                 else:
                     log_lines.append(f"{name}: {value}")
 
+            log_data(log_lines)
+            print("✔ Данные записаны")
+
+        except Exception as e:
+            log_error(f"Потеря связи или ошибка: {e}")
+            print("⚠ Потеря связи. Переподключение...")
             client.close()
+            client = connect_with_retry()
 
-    except Exception:
-        log_error(f"Критическая ошибка:\n{traceback.format_exc()}")
-        log_lines.append("Критическая ошибка выполнения скрипта.")
+        time.sleep(POLL_INTERVAL)
 
-    with open("log.txt", "a", encoding="utf-8") as f:
-        f.write("\n".join(log_lines) + "\n\n")
 
 if __name__ == "__main__":
-    poll_inverter()
+    poll_inverter_loop()
+
