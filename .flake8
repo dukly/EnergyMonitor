@@ -1,0 +1,11 @@
+; * pip install flake8 flake8-quotes * ;
+
+[flake8]
+; * General settings * ;
+max-line-length = 149
+ignore = Q003
+
+; * Quotes * ;
+inline-quotes = single
+docstring-quotes = double
+multiline-quotes = single
