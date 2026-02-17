@@ -2,10 +2,10 @@ import time
 from datetime import datetime
 
 from config import settings
-from database import Database
+from libraries.database import Database
 from handler import handle_measurement
 from logger import logger
-from modbus import ModbusClient
+from libraries.modbus import ModbusClient
 
 datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 

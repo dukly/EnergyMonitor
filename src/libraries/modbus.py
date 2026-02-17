@@ -15,12 +15,12 @@ class ModbusClient:
         # Create a ModbusTcpClient instance with the provided host and port
         self.client = ModbusTcpClient(host, port=port)
 
-    def connect(self, timeout=5, retries=3) -> bool:
+    def connect(self, retries=3) -> bool:
         """Attempts to connect to the Modbus server and returns True if successful, False otherwise."""
 
         # Try to connect to the Modbus server and return the result
         for i in range(retries):
-            if self.client.connect(timeout=timeout):
+            if self.client.connect():
                 return True
             logger.warning(f'Failed to connect to Modbus server (attempt {i + 1}/{retries})')
 
@@ -38,8 +38,8 @@ class ModbusClient:
         # Try to read two consecutive 16-bit registers and check for ModbusIOException, returning None if it occurs
         try:
             # Read two consecutive 16-bit registers and check for ModbusIOException
-            first_result = self.client.read_input_registers(address, 1)
-            second_result = self.client.read_input_registers(address + 1, 1)
+            first_result = self.client.read_input_registers(address=address, count=1)
+            second_result = self.client.read_input_registers(address=address + 1, count=1)
 
             # Check if either result is a ModbusIOException and log a warning if so
             if isinstance(first_result, ModbusIOException) or isinstance(second_result, ModbusIOException):
@@ -63,7 +63,7 @@ class ModbusClient:
         # Try to read the register and check for ModbusIOException, returning None if it occurs
         try:
             # Read the register and check for ModbusIOException
-            result = self.client.read_input_registers(address, 1)
+            result = self.client.read_input_registers(address=address, count=1)
 
             # Check if the result is a ModbusIOException and log a warning if so
             if isinstance(result, ModbusIOException):

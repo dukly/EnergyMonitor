@@ -1,14 +1,14 @@
 from datetime import datetime
 
-from database import Database
+from libraries.database import Database
 from logger import logger
-from modbus import ModbusClient
+from libraries.modbus import ModbusClient
 
 
 def handle_measurement(db: Database, client: ModbusClient) -> None:
     # Try to connect to Modbus server, if it fails, log the error and retry after 5 seconds
     try:
-        client.connect(timeout=5, retries=3)
+        client.connect(retries=3)
     except ConnectionError as e:
         logger.error(f'Unable to connect to Modbus server: {e}. Measurement skipped.', exc_info=True)
         return
