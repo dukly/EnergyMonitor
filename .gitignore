@@ -312,5 +312,7 @@ pyrightconfig.json
 
 # Custom
 *.sqlite
+*.db
+logs/
 main.dist/
 main.build/

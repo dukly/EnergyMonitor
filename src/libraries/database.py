@@ -4,28 +4,19 @@ from logger import logger
 
 
 class Database:
-    """This class provides methods to interact with the SQLite database for storing measurement data."""
+    """SQLite storage for inverter measurements."""
 
     def __init__(self, database_path: str) -> None:
-        """Initializes the Database class by connecting to the SQLite database and creating the measurements table if it doesn't exist."""
-
-        # Set the database path
         self.database_path = database_path
-
-        # Connect to the SQLite database (or create it if it doesn't exist)
         self.conn = sqlite3.connect(self.database_path)
         self.cur = self.conn.cursor()
-
-        # Initialize the database and create the measurements table if it doesn't exist
         self._initialize_database()
 
     def _initialize_database(self) -> None:
-        """This function initializes the SQLite database and creates the measurements table if it doesn't exist."""
-
-        # Execute the SQL command to create the measurements table if it doesn't already exist
         self.cur.execute('''
             CREATE TABLE IF NOT EXISTS measurements (
-                timestamp TEXT,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
                 voltage_dc REAL,
                 current_dc REAL,
                 power_ac REAL,
@@ -36,25 +27,88 @@ class Database:
                 energy_day REAL,
                 runtime REAL,
                 status INTEGER,
-                error INTEGER
+                error INTEGER,
+                status_text TEXT,
+                error_text TEXT
+            )
+        ''')
+        self.conn.commit()
+
+        self.cur.execute('PRAGMA table_info(measurements)')
+        columns = {row[1] for row in self.cur.fetchall()}
+
+        if 'id' not in columns:
+            self._migrate_legacy_table(columns)
+
+        self.cur.execute('''
+            CREATE INDEX IF NOT EXISTS idx_measurements_timestamp
+            ON measurements(timestamp)
+        ''')
+        self.conn.commit()
+
+    def _migrate_legacy_table(self, columns: set[str]) -> None:
+        logger.info('Migrating legacy measurements table to the new schema')
+
+        self.cur.execute('ALTER TABLE measurements RENAME TO measurements_legacy')
+        self.cur.execute('''
+            CREATE TABLE measurements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                voltage_dc REAL,
+                current_dc REAL,
+                power_ac REAL,
+                temp REAL,
+                freq REAL,
+                pf REAL,
+                energy_total REAL,
+                energy_day REAL,
+                runtime REAL,
+                status INTEGER,
+                error INTEGER,
+                status_text TEXT,
+                error_text TEXT
             )
         ''')
 
-        # Commit the changes
+        legacy_columns = [
+            column for column in (
+                'timestamp', 'voltage_dc', 'current_dc', 'power_ac', 'temp', 'freq', 'pf',
+                'energy_total', 'energy_day', 'runtime', 'status', 'error',
+            )
+            if column in columns
+        ]
+        column_list = ', '.join(legacy_columns)
+        self.cur.execute(f'''
+            INSERT INTO measurements ({column_list})
+            SELECT {column_list}
+            FROM measurements_legacy
+        ''')
+
+        self.cur.execute('DROP TABLE measurements_legacy')
         self.conn.commit()
 
     def save_measurement(
-        self, timestamp: str, voltage_dc: float, current_dc: float, power_ac: float, temp: float, freq: float,
-        pf: float, energy_total: float, energy_day: float, runtime: float, status: int, error: int,
+        self,
+        timestamp: str,
+        voltage_dc: float | None,
+        current_dc: float | None,
+        power_ac: float | None,
+        temp: float | None,
+        freq: float | None,
+        pf: float | None,
+        energy_total: float | None,
+        energy_day: float | None,
+        runtime: float | None,
+        status: int | None,
+        error: int | None,
+        status_text: str | None = None,
+        error_text: str | None = None,
     ) -> None:
-        """This function saves the provided measurement values to the SQLite database."""
-
-        # Execute the SQL command to insert the measurement data into the measurements table
         self.cur.execute('''
             INSERT INTO measurements (
                 timestamp, voltage_dc, current_dc, power_ac, temp, freq, pf,
-                energy_total, energy_day, runtime, status, error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                energy_total, energy_day, runtime, status, error, status_text, error_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             timestamp,
             voltage_dc,
@@ -68,15 +122,18 @@ class Database:
             runtime,
             status,
             error,
+            status_text,
+            error_text,
         ))
-
-        # Commit the changes
         self.conn.commit()
 
-        # Log the saved measurement data
         logger.info(
             (
-                f'Measurement saved: {timestamp}, {voltage_dc} V, {current_dc} A, {power_ac} W, {temp} °C, {freq} Hz, PF: {pf}, '
-                f'Energy Total: {energy_total} kWh, Energy Day: {energy_day} kWh, Runtime: {runtime} h, Status: {status}, Error: {error}'
+                f'Measurement saved: {timestamp}, {voltage_dc} V, {current_dc} A, {power_ac} W, {temp} °C, '
+                f'{freq} Hz, PF: {pf}, Energy Total: {energy_total} kWh, Energy Day: {energy_day} kWh, '
+                f'Runtime: {runtime} h, Status: {status} ({status_text}), Error: {error} ({error_text})'
             )
         )
+
+    def close(self) -> None:
+        self.conn.close()

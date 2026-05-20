@@ -1,58 +1,68 @@
 import time
-from datetime import datetime
 
 from config import settings
+from handler import handle_measurement
 from libraries.database import Database
 from libraries.modbus import ModbusClient
-from handler import handle_measurement
 from logger import logger
 
 
-def main():
-    logger.info("Starting Energy Monitor (console mode)...")
+def main() -> None:
+    logger.info('Starting Energy Monitor...')
 
-    # Initialize database
+    db = None
+    client = None
+
     try:
         db = Database(settings.sqlite_database_path)
-        logger.info(f"Connected to SQLite: {settings.sqlite_database_path}")
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.info(f'Connected to SQLite: {settings.sqlite_database_path}')
+    except Exception as error:
+        logger.error(f'Failed to initialize database: {error}', exc_info=True)
         return
 
-    # Initialize Modbus client
-    client = ModbusClient(settings.modbus_host, settings.modbus_port)
+    client = ModbusClient(
+        settings.modbus_host,
+        settings.modbus_port,
+        device_id=settings.modbus_device_id,
+    )
 
-    # Try to connect to Modbus
     try:
         client.connect()
-        logger.info(f"Connected to Modbus at {settings.modbus_host}:{settings.modbus_port}")
-    except Exception as e:
-        logger.error(f"Failed to connect to Modbus: {e}")
+        logger.info(f'Connected to Modbus at {settings.modbus_host}:{settings.modbus_port}')
+    except Exception as error:
+        logger.error(f'Failed to connect to Modbus: {error}', exc_info=True)
+        db.close()
         return
 
-    logger.info(f"Polling interval: {settings.modbus_poll_interval} seconds")
+    logger.info(f'Polling interval: {settings.modbus_poll_interval} seconds')
 
     try:
         while True:
             try:
-                # Your handler reads Modbus and saves to DB
                 handle_measurement(db, client)
-
-            except Exception as e:
-                logger.error(f"Error during measurement handling: {e}")
+            except ConnectionError as error:
+                logger.error(f'Modbus connection lost: {error}. Retrying on next cycle.', exc_info=True)
+                client.close()
+            except Exception as error:
+                logger.error(f'Error during measurement handling: {error}', exc_info=True)
 
             time.sleep(settings.modbus_poll_interval)
 
     except KeyboardInterrupt:
-        logger.info("Stopping Energy Monitor (Ctrl+C pressed)")
+        logger.info('Stopping Energy Monitor (Ctrl+C pressed)')
 
     finally:
-        try:
-            client.close()
-            logger.info("Modbus connection closed")
-        except:
-            pass
+        if client is not None:
+            try:
+                client.close()
+                logger.info('Modbus connection closed')
+            except Exception as error:
+                logger.error(f'Failed to close Modbus connection: {error}', exc_info=True)
+
+        if db is not None:
+            db.close()
+            logger.info('Database connection closed')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

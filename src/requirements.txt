@@ -1,2 +1,2 @@
-pymodbus
-pydantic-settings
+pymodbus==3.11.4
+pydantic-settings==2.7.1

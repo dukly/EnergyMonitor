@@ -1,33 +1,52 @@
 from datetime import datetime
 
+from config import settings
 from libraries.database import Database
-from logger import logger
 from libraries.modbus import ModbusClient
+from logger import logger
+from status_labels import decode_error, decode_status
 
 
 def handle_measurement(db: Database, client: ModbusClient) -> None:
-    # Try to connect to Modbus server, if it fails, log the error and retry after 5 seconds
-    try:
-        client.connect(retries=3)
-    except ConnectionError as e:
-        logger.error(f'Unable to connect to Modbus server: {e}. Measurement skipped.', exc_info=True)
-        return
+    client.ensure_connected(retries=3)
 
-    # Read data from Modbus registers and save to database
-    db.save_measurement(
-        timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        voltage_dc=client.read_float32(32000),
-        current_dc=client.read_float32(32002),
-        power_ac=client.read_float32(32004),
-        temp=client.read_float32(32006),
-        freq=client.read_float32(32008),
-        pf=client.read_float32(32010),
-        energy_total=client.read_float32(32012),
-        energy_day=client.read_float32(32014),
-        runtime=client.read_float32(32016),
-        status=client.read_int16(32018),
-        error=client.read_int16(32019),
+    measurement = client.read_measurement_block(
+        start_address=settings.modbus_register_start,
+        count=settings.modbus_register_count,
     )
 
-    # Close Modbus connection
-    client.close()
+    if all(value is None for value in (
+        measurement.voltage_dc,
+        measurement.current_dc,
+        measurement.power_ac,
+        measurement.temp,
+        measurement.freq,
+        measurement.pf,
+        measurement.energy_total,
+        measurement.energy_day,
+        measurement.runtime,
+        measurement.status,
+        measurement.error,
+    )):
+        logger.error('All Modbus values are empty. Measurement skipped.')
+        return
+
+    status_text = decode_status(measurement.status)
+    error_text = decode_error(measurement.error)
+
+    db.save_measurement(
+        timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        voltage_dc=measurement.voltage_dc,
+        current_dc=measurement.current_dc,
+        power_ac=measurement.power_ac,
+        temp=measurement.temp,
+        freq=measurement.freq,
+        pf=measurement.pf,
+        energy_total=measurement.energy_total,
+        energy_day=measurement.energy_day,
+        runtime=measurement.runtime,
+        status=measurement.status,
+        error=measurement.error,
+        status_text=status_text,
+        error_text=error_text,
+    )
