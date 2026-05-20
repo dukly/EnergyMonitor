@@ -1,105 +1,60 @@
-# ⚡ ЭнергоМонитор
+# САНХОРС Мониторинг (sunhors-agent)
 
-Мониторинг инвертора через Modbus TCP (через USR‑W610).
+Edge-агент для мониторинга инвертора по Modbus TCP (USR-W610) с синхронизацией в **SUNHORS Energy Cloud**.
 
-**ЭнергоМонитор** — Python‑утилита для опроса инвертора по Modbus TCP, сохранения телеметрии в SQLite и логирования в файлы с ротацией.
+Продукт компании **САНХОРС** — [sunhors.ru](https://sunhors.ru/)
 
----
+## Компоненты репозитория
 
-## 🚀 Возможности
+| Путь | Назначение |
+|------|------------|
+| [`src/`](src/) | sunhors-agent (Modbus → SQLite → cloud) |
+| [`cloud/`](cloud/) | MVP API: license, telemetry, metrics |
+| [`portal/`](portal/) | Личный кабинет (MVP) |
+| [`infra/`](infra/) | Docker Compose: Postgres + API + portal |
+| [`install/`](install/) | Установка: шлюз / Windows / Docker |
+| [`docs/`](docs/) | Продукт, команда, runbook |
 
-- Чтение регистров инвертора одним блоковым запросом Modbus
-- Поддержка Modbus TCP через USR‑W610
-- Сохранение телеметрии в SQLite (`energymonitor.db`)
-- Логи: `logs/monitor.log` и `logs/error.log` (ротация файлов)
-- Расшифровка статусов и кодов ошибок (`status_text`, `error_text`)
-- Обработка исключений и переподключение при обрыве связи
-- CI: `flake8` и `pytest`
+## Быстрый старт
 
----
-
-## 📡 Поддерживаемые параметры
-
-| Параметр             | Адрес | Тип   |
-|----------------------|-------|-------|
-| Напряжение DC        | 32000 | float |
-| Ток DC               | 32002 | float |
-| Мощность AC          | 32004 | float |
-| Температура корпуса  | 32006 | float |
-| Частота сети         | 32008 | float |
-| Коэффициент мощности | 32010 | float |
-| Общая энергия        | 32012 | float |
-| Энергия за день      | 32014 | float |
-| Время работы         | 32016 | float |
-| Статус инвертера     | 32018 | int   |
-| Код ошибки           | 32019 | int   |
-
-Словари расшифровки настраиваются в `src/status_labels.py`.
-
----
-
-## 🧩 Интеграция с USR‑W610
-
-1. Подключите инвертор к RS485‑клеммам устройства
-2. Настройте USR‑W610 в режиме **TCP Server**
-3. Укажите порт (например, 502)
-4. Настройте RS485 (9600 8N1 или параметры вашего инвертера)
-5. Установите статический IP, например `192.168.0.100`
-
----
-
-## 🛠 Установка и запуск
+### 1. Облако + портал (локально)
 
 ```bash
+cd infra
+docker compose up -d
+```
+
+- API: http://localhost:8000/docs  
+- Портал: http://localhost:8080  
+
+### 2. Агент на объекте
+
+```bash
+copy .env.example .env
 cd src
 pip install -r requirements.txt
-```
-
-Скопируйте пример конфигурации в корень репозитория:
-
-```bash
-copy ..\.env.example ..\.env
-```
-
-Отредактируйте `.env` (путь относительно корня проекта):
-
-```env
-MODBUS_HOST=192.168.0.100
-MODBUS_PORT=502
-MODBUS_POLL_INTERVAL=5
-```
-
-Запуск:
-
-```bash
 python main.py
 ```
 
-Остановка: `Ctrl+C`.
+Демо-ключ: `LICENSE_KEY=demo-business-key`, `SITE_ID=demo-site`
 
----
+## Тарифы
 
-## 🧪 Разработка
+См. [docs/PRODUCT.md](docs/PRODUCT.md)
+
+## Установка у клиентов
+
+См. [docs/INSTALL.md](docs/INSTALL.md) — приоритет **канал A** (шлюз Raspberry Pi).
+
+## Dev-отдел
+
+См. [docs/TEAM.md](docs/TEAM.md)
+
+## Тесты
 
 ```bash
-pip install -r requirements.txt
-pip install -r ../requirements-dev.txt
-cd ..
+pip install -r src/requirements.txt
+pip install -r requirements-dev.txt
 pytest
 flake8 src tests
-```
-
----
-
-## 📁 Структура
-
-```
-src/
-  main.py              # цикл опроса
-  handler.py           # чтение Modbus и запись в БД
-  config.py            # настройки из .env
-  status_labels.py     # расшифровка статусов
-  libraries/
-    modbus.py          # клиент Modbus
-    database.py        # SQLite
 ```

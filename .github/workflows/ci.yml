@@ -7,23 +7,30 @@ on:
     branches: [main]
 
 jobs:
-  lint-and-test:
+  agent:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: Install dependencies
+      - name: Install agent dependencies
         run: |
           pip install -r src/requirements.txt
           pip install -r requirements-dev.txt
-
-      - name: Lint
+      - name: Lint agent
         run: flake8 src tests
-
-      - name: Test
+      - name: Test agent
         run: pytest
+
+  cloud:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install cloud dependencies
+        run: pip install -r cloud/requirements.txt
+      - name: Lint cloud
+        run: python -m compileall cloud/app

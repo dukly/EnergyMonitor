@@ -1,0 +1,12 @@
+# Channel C — agent on client NAS/server
+services:
+  sunhors-agent:
+    build:
+      context: ../..
+      dockerfile: install/docker/Dockerfile.agent
+    env_file: .env
+    volumes:
+      - ./data:/data
+      - ./logs:/logs
+    restart: unless-stopped
+    network_mode: host

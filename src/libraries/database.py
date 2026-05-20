@@ -1,4 +1,5 @@
 import sqlite3
+from typing import Any
 
 from logger import logger
 
@@ -9,6 +10,7 @@ class Database:
     def __init__(self, database_path: str) -> None:
         self.database_path = database_path
         self.conn = sqlite3.connect(self.database_path)
+        self.conn.row_factory = sqlite3.Row
         self.cur = self.conn.cursor()
         self._initialize_database()
 
@@ -29,7 +31,8 @@ class Database:
                 status INTEGER,
                 error INTEGER,
                 status_text TEXT,
-                error_text TEXT
+                error_text TEXT,
+                synced INTEGER NOT NULL DEFAULT 0
             )
         ''')
         self.conn.commit()
@@ -37,12 +40,20 @@ class Database:
         self.cur.execute('PRAGMA table_info(measurements)')
         columns = {row[1] for row in self.cur.fetchall()}
 
+        if 'synced' not in columns:
+            self.cur.execute('ALTER TABLE measurements ADD COLUMN synced INTEGER NOT NULL DEFAULT 0')
+            self.conn.commit()
+
         if 'id' not in columns:
             self._migrate_legacy_table(columns)
 
         self.cur.execute('''
             CREATE INDEX IF NOT EXISTS idx_measurements_timestamp
             ON measurements(timestamp)
+        ''')
+        self.cur.execute('''
+            CREATE INDEX IF NOT EXISTS idx_measurements_synced
+            ON measurements(synced)
         ''')
         self.conn.commit()
 
@@ -66,7 +77,8 @@ class Database:
                 status INTEGER,
                 error INTEGER,
                 status_text TEXT,
-                error_text TEXT
+                error_text TEXT,
+                synced INTEGER NOT NULL DEFAULT 0
             )
         ''')
 
@@ -103,12 +115,12 @@ class Database:
         error: int | None,
         status_text: str | None = None,
         error_text: str | None = None,
-    ) -> None:
+    ) -> int:
         self.cur.execute('''
             INSERT INTO measurements (
                 timestamp, voltage_dc, current_dc, power_ac, temp, freq, pf,
-                energy_total, energy_day, runtime, status, error, status_text, error_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                energy_total, energy_day, runtime, status, error, status_text, error_text, synced
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
         ''', (
             timestamp,
             voltage_dc,
@@ -126,14 +138,36 @@ class Database:
             error_text,
         ))
         self.conn.commit()
+        measurement_id = int(self.cur.lastrowid)
 
         logger.info(
             (
-                f'Measurement saved: {timestamp}, {voltage_dc} V, {current_dc} A, {power_ac} W, {temp} °C, '
-                f'{freq} Hz, PF: {pf}, Energy Total: {energy_total} kWh, Energy Day: {energy_day} kWh, '
-                f'Runtime: {runtime} h, Status: {status} ({status_text}), Error: {error} ({error_text})'
+                f'Measurement saved [#{measurement_id}]: {timestamp}, {voltage_dc} V, {current_dc} A, '
+                f'{power_ac} W, Status: {status} ({status_text}), Error: {error} ({error_text})'
             )
         )
+        return measurement_id
+
+    def get_unsynced_measurements(self, limit: int = 50) -> list[dict[str, Any]]:
+        self.cur.execute('''
+            SELECT id, timestamp, voltage_dc, current_dc, power_ac, temp, freq, pf,
+                   energy_total, energy_day, runtime, status, error, status_text, error_text
+            FROM measurements
+            WHERE synced = 0
+            ORDER BY id ASC
+            LIMIT ?
+        ''', (limit,))
+        return [dict(row) for row in self.cur.fetchall()]
+
+    def mark_measurements_synced(self, measurement_ids: list[int]) -> None:
+        if not measurement_ids:
+            return
+        placeholders = ', '.join('?' for _ in measurement_ids)
+        self.cur.execute(
+            f'UPDATE measurements SET synced = 1 WHERE id IN ({placeholders})',
+            measurement_ids,
+        )
+        self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()

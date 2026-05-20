@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info:
+  title: SUNHORS Energy Cloud API
+  version: 0.1.0
+  description: MVP API for САНХОРС Мониторинг
+paths:
+  /health:
+    get:
+      summary: Health check
+  /v1/license/validate:
+    post:
+      summary: Validate site license
+  /v1/telemetry:
+    post:
+      summary: Ingest measurements from sunhors-agent
+  /v1/sites/{site_id}/metrics:
+    get:
+      summary: Metrics for client portal

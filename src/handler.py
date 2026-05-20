@@ -1,18 +1,22 @@
 from datetime import datetime
 
 from config import settings
+from inverter_profiles import get_profile
 from libraries.database import Database
 from libraries.modbus import ModbusClient
 from logger import logger
 from status_labels import decode_error, decode_status
 
 
-def handle_measurement(db: Database, client: ModbusClient) -> None:
+def handle_measurement(db: Database, client: ModbusClient) -> int | None:
+    profile = get_profile(settings.inverter_profile)
+    client.device_id = profile.device_id
+
     client.ensure_connected(retries=3)
 
     measurement = client.read_measurement_block(
-        start_address=settings.modbus_register_start,
-        count=settings.modbus_register_count,
+        start_address=profile.register_start,
+        count=profile.register_count,
     )
 
     if all(value is None for value in (
@@ -29,12 +33,12 @@ def handle_measurement(db: Database, client: ModbusClient) -> None:
         measurement.error,
     )):
         logger.error('All Modbus values are empty. Measurement skipped.')
-        return
+        return None
 
     status_text = decode_status(measurement.status)
     error_text = decode_error(measurement.error)
 
-    db.save_measurement(
+    return db.save_measurement(
         timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         voltage_dc=measurement.voltage_dc,
         current_dc=measurement.current_dc,

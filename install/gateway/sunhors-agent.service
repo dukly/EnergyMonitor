@@ -1,0 +1,16 @@
+[Unit]
+Description=SUNHORS sunhors-agent (Modbus telemetry)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sunhors
+WorkingDirectory=/opt/sunhors-agent
+EnvironmentFile=/opt/sunhors-agent/.env
+ExecStart=/opt/sunhors-agent/venv/bin/python /opt/sunhors-agent/src/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

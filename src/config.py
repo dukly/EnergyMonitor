@@ -15,7 +15,13 @@ def resolve_project_path(path: str) -> Path:
 
 
 class Settings(BaseSettings):
-    """Settings for the Energy Monitor application."""
+    """Settings for SUNHORS sunhors-agent."""
+
+    app_name: str = 'sunhors-agent'
+
+    site_id: str = 'demo-site'
+    license_key: str = ''
+    inverter_profile: str = 'default'
 
     modbus_host: str = 'localhost'
     modbus_port: int = 502
@@ -24,7 +30,12 @@ class Settings(BaseSettings):
     modbus_register_start: int = 32000
     modbus_register_count: int = 20
 
-    sqlite_database_path: str = 'energymonitor.db'
+    license_api_url: str = 'http://localhost:8000'
+    cloud_api_url: str = 'http://localhost:8000'
+    cloud_request_timeout: float = 10.0
+    cloud_sync_batch_size: int = 50
+
+    sqlite_database_path: str = 'data/sunhors.db'
 
     log_file_path: str = 'logs/monitor.log'
     error_log_file_path: str = 'logs/error.log'
