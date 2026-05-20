@@ -5,7 +5,8 @@
 
 ## Канал A: шлюз «под ключ» (рекомендуется B2B)
 
-Скрипты: [`install/gateway/`](../install/gateway/)
+Скрипты: [`install/gateway/`](../install/gateway/)  
+**Закрытый репозиторий для Raspberry Pi:** `sunhors-agent-rpi` (рядом с EnergyMonitor, только пакет шлюза)
 
 | Шаг | Действие |
 |-----|----------|
