@@ -60,7 +60,7 @@ def main() -> None:
             try:
                 handle_measurement(db, client)
                 uploader.sync_pending(db)
-            except ConnectionError as error:
+            except (ConnectionError, OSError) as error:
                 logger.error(f'Modbus connection lost: {error}. Retrying on next cycle.', exc_info=True)
                 client.close()
             except Exception as error:

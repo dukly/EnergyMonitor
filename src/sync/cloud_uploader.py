@@ -42,10 +42,16 @@ class CloudUploader:
             )
             response.raise_for_status()
             result = response.json()
-            synced_ids = result.get('synced_ids', [row['id'] for row in rows])
-            db.mark_measurements_synced(synced_ids)
-            logger.info(f'Cloud sync OK: {len(synced_ids)} measurements')
-            return len(synced_ids)
         except Exception as error:
             logger.error(f'Cloud sync failed: {error}', exc_info=True)
             return 0
+
+        synced_ids = result.get('synced_ids')
+        if not isinstance(synced_ids, list) or not synced_ids:
+            logger.warning('Cloud API response missing synced_ids; batch will be retried later')
+            return 0
+
+        confirmed_ids = [int(item) for item in synced_ids]
+        db.mark_measurements_synced(confirmed_ids)
+        logger.info(f'Cloud sync OK: {len(confirmed_ids)} measurements')
+        return len(confirmed_ids)

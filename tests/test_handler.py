@@ -31,6 +31,7 @@ def test_handle_measurement_saves_row(tmp_path) -> None:
     )
 
     handle_measurement(db, client)
+    client.ensure_connected.assert_called_once()
 
     db.cur.execute('SELECT COUNT(*) FROM measurements')
     assert db.cur.fetchone()[0] == 1
@@ -83,4 +84,35 @@ def test_database_migration_from_legacy_schema(tmp_path) -> None:
 
     db.cur.execute('SELECT COUNT(*) FROM measurements')
     assert db.cur.fetchone()[0] == 1
+    db.close()
+
+
+def test_database_adds_missing_columns_when_id_exists(tmp_path) -> None:
+    db_path = tmp_path / 'partial.db'
+    conn = __import__('sqlite3').connect(db_path)
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE measurements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            voltage_dc REAL,
+            status INTEGER,
+            error INTEGER
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+    db = Database(str(db_path))
+    columns = {row[1] for row in db.cur.execute('PRAGMA table_info(measurements)').fetchall()}
+    assert 'status_text' in columns
+    assert 'error_text' in columns
+    assert 'synced' in columns
+    db.close()
+
+
+def test_database_creates_parent_directory(tmp_path) -> None:
+    db_path = tmp_path / 'nested' / 'data' / 'sunhors.db'
+    db = Database(str(db_path))
+    assert db_path.exists()
     db.close()

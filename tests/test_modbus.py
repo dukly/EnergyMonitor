@@ -1,4 +1,5 @@
 import struct
+from unittest.mock import MagicMock
 
 from libraries.modbus import ModbusClient
 
@@ -26,3 +27,31 @@ def test_read_measurement_block_parses_registers() -> None:
     assert measurement.voltage_dc == 400.0
     assert measurement.status == 1
     assert measurement.error == 0
+
+
+def test_read_measurement_block_rejects_short_response() -> None:
+    client = ModbusClient('localhost', 502)
+    client.read_registers_block = lambda start, count: [0, 1, 2]
+
+    measurement = client.read_measurement_block(32000, 20)
+
+    assert measurement.voltage_dc is None
+    assert measurement.status is None
+
+
+def test_handler_closes_client_on_empty_measurement(tmp_path) -> None:
+    from handler import handle_measurement
+    from libraries.database import Database
+    from libraries.modbus import InverterMeasurement
+
+    db = Database(str(tmp_path / 'test.db'))
+    client = MagicMock(spec=ModbusClient)
+    client.read_measurement_block.return_value = InverterMeasurement(
+        None, None, None, None, None, None, None, None, None, None, None,
+    )
+
+    result = handle_measurement(db, client)
+
+    assert result is None
+    client.close.assert_called_once()
+    db.close()

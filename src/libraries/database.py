@@ -1,7 +1,14 @@
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 from logger import logger
+
+SCHEMA_COLUMNS: dict[str, str] = {
+    'synced': 'INTEGER NOT NULL DEFAULT 0',
+    'status_text': 'TEXT',
+    'error_text': 'TEXT',
+}
 
 
 class Database:
@@ -9,6 +16,8 @@ class Database:
 
     def __init__(self, database_path: str) -> None:
         self.database_path = database_path
+        Path(database_path).parent.mkdir(parents=True, exist_ok=True)
+
         self.conn = sqlite3.connect(self.database_path)
         self.conn.row_factory = sqlite3.Row
         self.cur = self.conn.cursor()
@@ -37,15 +46,13 @@ class Database:
         ''')
         self.conn.commit()
 
-        self.cur.execute('PRAGMA table_info(measurements)')
-        columns = {row[1] for row in self.cur.fetchall()}
-
-        if 'synced' not in columns:
-            self.cur.execute('ALTER TABLE measurements ADD COLUMN synced INTEGER NOT NULL DEFAULT 0')
-            self.conn.commit()
+        columns = self._table_columns()
 
         if 'id' not in columns:
             self._migrate_legacy_table(columns)
+            columns = self._table_columns()
+
+        self._ensure_columns(columns)
 
         self.cur.execute('''
             CREATE INDEX IF NOT EXISTS idx_measurements_timestamp
@@ -56,6 +63,18 @@ class Database:
             ON measurements(synced)
         ''')
         self.conn.commit()
+
+    def _table_columns(self) -> set[str]:
+        self.cur.execute('PRAGMA table_info(measurements)')
+        return {row[1] for row in self.cur.fetchall()}
+
+    def _ensure_columns(self, columns: set[str]) -> None:
+        for column_name, column_type in SCHEMA_COLUMNS.items():
+            if column_name in columns:
+                continue
+            self.cur.execute(f'ALTER TABLE measurements ADD COLUMN {column_name} {column_type}')
+            self.conn.commit()
+            logger.info(f'Added missing column: {column_name}')
 
     def _migrate_legacy_table(self, columns: set[str]) -> None:
         logger.info('Migrating legacy measurements table to the new schema')
@@ -89,12 +108,13 @@ class Database:
             )
             if column in columns
         ]
-        column_list = ', '.join(legacy_columns)
-        self.cur.execute(f'''
-            INSERT INTO measurements ({column_list})
-            SELECT {column_list}
-            FROM measurements_legacy
-        ''')
+        if legacy_columns:
+            column_list = ', '.join(legacy_columns)
+            self.cur.execute(f'''
+                INSERT INTO measurements ({column_list})
+                SELECT {column_list}
+                FROM measurements_legacy
+            ''')
 
         self.cur.execute('DROP TABLE measurements_legacy')
         self.conn.commit()

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 
@@ -71,6 +71,10 @@ class LicenseClient:
         if not expires_at:
             return False
         try:
-            return datetime.fromisoformat(expires_at) < datetime.now()
+            expiry = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            return expiry < datetime.now(timezone.utc)
         except ValueError:
+            logger.warning(f'Unable to parse license expiry date: {expires_at}')
             return False

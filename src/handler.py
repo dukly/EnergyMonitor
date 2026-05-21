@@ -3,9 +3,25 @@ from datetime import datetime
 from config import settings
 from inverter_profiles import get_profile
 from libraries.database import Database
-from libraries.modbus import ModbusClient
+from libraries.modbus import InverterMeasurement, ModbusClient
 from logger import logger
 from status_labels import decode_error, decode_status
+
+
+def _is_empty_measurement(measurement: InverterMeasurement) -> bool:
+    return all(value is None for value in (
+        measurement.voltage_dc,
+        measurement.current_dc,
+        measurement.power_ac,
+        measurement.temp,
+        measurement.freq,
+        measurement.pf,
+        measurement.energy_total,
+        measurement.energy_day,
+        measurement.runtime,
+        measurement.status,
+        measurement.error,
+    ))
 
 
 def handle_measurement(db: Database, client: ModbusClient) -> int | None:
@@ -19,20 +35,9 @@ def handle_measurement(db: Database, client: ModbusClient) -> int | None:
         count=profile.register_count,
     )
 
-    if all(value is None for value in (
-        measurement.voltage_dc,
-        measurement.current_dc,
-        measurement.power_ac,
-        measurement.temp,
-        measurement.freq,
-        measurement.pf,
-        measurement.energy_total,
-        measurement.energy_day,
-        measurement.runtime,
-        measurement.status,
-        measurement.error,
-    )):
-        logger.error('All Modbus values are empty. Measurement skipped.')
+    if _is_empty_measurement(measurement):
+        logger.error('All Modbus values are empty. Closing connection for reconnect on next cycle.')
+        client.close()
         return None
 
     status_text = decode_status(measurement.status)

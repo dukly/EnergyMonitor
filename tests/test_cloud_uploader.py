@@ -22,7 +22,7 @@ def test_uploader_syncs_rows(mock_post: MagicMock, tmp_path) -> None:
     mock_post.return_value = mock_response
 
     db = Database(str(tmp_path / 'test.db'))
-    measurement_id = db.save_measurement(
+    db.save_measurement(
         timestamp='2026-05-20 12:00:00',
         voltage_dc=230.0,
         current_dc=5.0,
@@ -45,7 +45,37 @@ def test_uploader_syncs_rows(mock_post: MagicMock, tmp_path) -> None:
 
     synced = uploader.sync_pending(db)
     assert synced == 1
+    assert db.get_unsynced_measurements() == []
+    db.close()
 
-    rows = db.get_unsynced_measurements()
-    assert rows == [] or measurement_id not in [row['id'] for row in rows]
+
+@patch('sync.cloud_uploader.httpx.post')
+def test_uploader_does_not_mark_rows_without_synced_ids(mock_post: MagicMock, tmp_path) -> None:
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    mock_response.json.return_value = {}
+    mock_post.return_value = mock_response
+
+    db = Database(str(tmp_path / 'test.db'))
+    db.save_measurement(
+        timestamp='2026-05-20 12:00:00',
+        voltage_dc=230.0,
+        current_dc=5.0,
+        power_ac=1000.0,
+        temp=40.0,
+        freq=50.0,
+        pf=0.98,
+        energy_total=100.0,
+        energy_day=5.0,
+        runtime=10.0,
+        status=1,
+        error=0,
+    )
+
+    info = LicenseInfo(True, 'business', 'demo-site', None, True)
+    uploader = CloudUploader(info)
+    uploader.license_key = 'demo-business-key'
+
+    assert uploader.sync_pending(db) == 0
+    assert len(db.get_unsynced_measurements()) == 1
     db.close()

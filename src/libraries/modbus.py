@@ -24,7 +24,7 @@ class InverterMeasurement:
 class ModbusClient:
     """Wrapper around ModbusTcpClient for inverter telemetry."""
 
-    FLOAT_ADDRESSES = (0, 2, 4, 6, 8, 10, 12, 14, 16)
+    FLOAT_OFFSETS = (0, 2, 4, 6, 8, 10, 12, 14, 16)
     STATUS_OFFSET = 18
     ERROR_OFFSET = 19
 
@@ -47,6 +47,10 @@ class ModbusClient:
     def close(self) -> None:
         self.client.close()
 
+    def reconnect(self, retries: int = 3) -> None:
+        self.close()
+        self.connect(retries=retries)
+
     def ensure_connected(self, retries: int = 3) -> None:
         if not self.is_connected:
             self.connect(retries=retries)
@@ -54,7 +58,10 @@ class ModbusClient:
     @staticmethod
     def _decode_float32(high_register: int, low_register: int) -> float:
         raw = (high_register << 16) | low_register
-        return struct.unpack('>f', raw.to_bytes(4, byteorder='big'))[0]
+        value = struct.unpack('>f', raw.to_bytes(4, byteorder='big'))[0]
+        if value != value:  # NaN
+            raise struct.error('decoded NaN')
+        return value
 
     def read_registers_block(self, start_address: int, count: int) -> list[int] | None:
         try:
@@ -71,9 +78,16 @@ class ModbusClient:
             logger.warning(f'Ignoring Modbus error reading register block at {start_address}: {result}')
             return None
 
-        return list(result.registers)
+        registers = list(result.registers)
+        if len(registers) < count:
+            logger.warning(
+                f'Incomplete Modbus block at {start_address}: expected {count}, got {len(registers)}',
+            )
+            return None
 
-    def read_float32(self, address: int, registers: list[int] | None, offset: int) -> float | None:
+        return registers
+
+    def read_float32(self, registers: list[int] | None, offset: int, address: int) -> float | None:
         if registers is None:
             return None
 
@@ -99,18 +113,25 @@ class ModbusClient:
         if registers is None:
             return InverterMeasurement(None, None, None, None, None, None, None, None, None, None, None)
 
-        base_offset = start_address - 32000
+        if len(registers) < count or count < self.ERROR_OFFSET + 1:
+            logger.warning(
+                f'Register block too short: start={start_address}, expected={count}, got={len(registers)}',
+            )
+            return InverterMeasurement(None, None, None, None, None, None, None, None, None, None, None)
+
+        def addr(offset: int) -> int:
+            return start_address + offset
 
         return InverterMeasurement(
-            voltage_dc=self.read_float32(32000, registers, base_offset + self.FLOAT_ADDRESSES[0]),
-            current_dc=self.read_float32(32002, registers, base_offset + self.FLOAT_ADDRESSES[1]),
-            power_ac=self.read_float32(32004, registers, base_offset + self.FLOAT_ADDRESSES[2]),
-            temp=self.read_float32(32006, registers, base_offset + self.FLOAT_ADDRESSES[3]),
-            freq=self.read_float32(32008, registers, base_offset + self.FLOAT_ADDRESSES[4]),
-            pf=self.read_float32(32010, registers, base_offset + self.FLOAT_ADDRESSES[5]),
-            energy_total=self.read_float32(32012, registers, base_offset + self.FLOAT_ADDRESSES[6]),
-            energy_day=self.read_float32(32014, registers, base_offset + self.FLOAT_ADDRESSES[7]),
-            runtime=self.read_float32(32016, registers, base_offset + self.FLOAT_ADDRESSES[8]),
-            status=self.read_int16(registers, base_offset + self.STATUS_OFFSET, 32018),
-            error=self.read_int16(registers, base_offset + self.ERROR_OFFSET, 32019),
+            voltage_dc=self.read_float32(registers, self.FLOAT_OFFSETS[0], addr(0)),
+            current_dc=self.read_float32(registers, self.FLOAT_OFFSETS[1], addr(2)),
+            power_ac=self.read_float32(registers, self.FLOAT_OFFSETS[2], addr(4)),
+            temp=self.read_float32(registers, self.FLOAT_OFFSETS[3], addr(6)),
+            freq=self.read_float32(registers, self.FLOAT_OFFSETS[4], addr(8)),
+            pf=self.read_float32(registers, self.FLOAT_OFFSETS[5], addr(10)),
+            energy_total=self.read_float32(registers, self.FLOAT_OFFSETS[6], addr(12)),
+            energy_day=self.read_float32(registers, self.FLOAT_OFFSETS[7], addr(14)),
+            runtime=self.read_float32(registers, self.FLOAT_OFFSETS[8], addr(16)),
+            status=self.read_int16(registers, self.STATUS_OFFSET, addr(18)),
+            error=self.read_int16(registers, self.ERROR_OFFSET, addr(19)),
         )
