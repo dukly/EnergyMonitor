@@ -1,0 +1,16 @@
+[Unit]
+Description=EnergyMonitor agent (Modbus telemetry)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/energy-monitor-agent
+EnvironmentFile=/opt/energy-monitor-agent/.env
+ExecStart=/opt/energy-monitor-agent/venv/bin/python /opt/energy-monitor-agent/src/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

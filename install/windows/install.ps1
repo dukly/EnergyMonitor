@@ -1,15 +1,14 @@
-# SUNHORS sunhors-agent — Windows install (Channel B)
+# EnergyMonitor agent — Windows install
 param(
-    [string]$InstallDir = "$env:ProgramFiles\Sunhors\Agent",
+    [string]$InstallDir = "$env:ProgramFiles\EnergyMonitor\Agent",
     [string]$ModbusHost = "192.168.0.100",
-    [string]$SiteId = "demo-site",
-    [string]$LicenseKey = "demo-business-key"
+    [string]$InverterProfile = "default"
 )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 
-Write-Host "Installing sunhors-agent to $InstallDir"
+Write-Host "Installing EnergyMonitor agent to $InstallDir"
 
 New-Item -ItemType Directory -Force -Path $InstallDir, "$InstallDir\logs", "$InstallDir\data" | Out-Null
 Copy-Item -Recurse -Force "$RepoRoot\src" "$InstallDir\src"
@@ -17,12 +16,10 @@ Copy-Item -Recurse -Force "$RepoRoot\src" "$InstallDir\src"
 $envContent = @"
 MODBUS_HOST=$ModbusHost
 MODBUS_PORT=502
-SITE_ID=$SiteId
-LICENSE_KEY=$LicenseKey
-INVERTER_PROFILE=deye
-SQLITE_DATABASE_PATH=data/sunhors.db
-LICENSE_API_URL=http://localhost:8000
-CLOUD_API_URL=http://localhost:8000
+INVERTER_PROFILE=$InverterProfile
+SQLITE_DATABASE_PATH=data/monitor.db
+LOG_FILE_PATH=logs/monitor.log
+ERROR_LOG_FILE_PATH=logs/error.log
 "@
 Set-Content -Path "$InstallDir\.env" -Value $envContent -Encoding UTF8
 
@@ -31,6 +28,6 @@ python -m venv "$InstallDir\venv"
 
 $action = New-ScheduledTaskAction -Execute "$InstallDir\venv\Scripts\python.exe" -Argument "$InstallDir\src\main.py" -WorkingDirectory $InstallDir
 $trigger = New-ScheduledTaskTrigger -AtStartup
-Register-ScheduledTask -TaskName "SunhorsAgent" -Action $action -Trigger $trigger -RunLevel Highest -Force
+Register-ScheduledTask -TaskName "EnergyMonitorAgent" -Action $action -Trigger $trigger -RunLevel Highest -Force
 
-Write-Host "Done. Start with: Start-ScheduledTask -TaskName SunhorsAgent"
+Write-Host "Done. Start with: Start-ScheduledTask -TaskName EnergyMonitorAgent"

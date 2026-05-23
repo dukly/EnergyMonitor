@@ -5,7 +5,7 @@ COPY src/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 COPY src ./src
 
-ENV SQLITE_DATABASE_PATH=/data/sunhors.db
+ENV SQLITE_DATABASE_PATH=/data/monitor.db
 ENV LOG_FILE_PATH=/logs/monitor.log
 ENV ERROR_LOG_FILE_PATH=/logs/error.log
 

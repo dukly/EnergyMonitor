@@ -1,54 +1,42 @@
-# САНХОРС Мониторинг (sunhors-agent)
+# EnergyMonitor
 
-Edge-агент для мониторинга инвертора по Modbus TCP (USR-W610) с синхронизацией в **SUNHORS Energy Cloud**.
+Агент сбора телеметрии инвертора по **Modbus TCP** (например USR-W610 в режиме TCP Server, порт 502) с записью в **SQLite**.
 
-Продукт компании **САНХОРС** — [sunhors.ru](https://sunhors.ru/)
-
-## Компоненты репозитория
+## Структура
 
 | Путь | Назначение |
 |------|------------|
-| [`src/`](src/) | sunhors-agent (Modbus → SQLite → cloud) |
-| [`cloud/`](cloud/) | MVP API: license, telemetry, metrics |
-| [`portal/`](portal/) | Личный кабинет (MVP) |
-| [`infra/`](infra/) | Docker Compose: Postgres + API + portal |
-| [`install/`](install/) | Установка: шлюз / Windows / Docker |
-| [`docs/`](docs/) | Продукт, команда, runbook |
+| [`src/`](src/) | Агент: Modbus → SQLite, логи |
+| [`src/inverter_profiles/`](src/inverter_profiles/) | Карты регистров (default, deye, goodwe) |
+| [`install/gateway/`](install/gateway/) | Установка на Linux (systemd) |
+| [`install/windows/`](install/windows/) | Установка на Windows (Планировщик задач) |
+| [`install/docker/`](install/docker/) | Запуск в Docker |
+| [`docs/INSTALL.md`](docs/INSTALL.md) | Краткий runbook установки |
 
 ## Быстрый старт
 
-### 1. Облако + портал (локально)
-
-```bash
-cd infra
-docker compose up -d
-```
-
-- API: http://localhost:8000/docs  
-- Портал: http://localhost:8080  
-
-### 2. Агент на объекте
-
 ```bash
 copy .env.example .env
+# Отредактируйте MODBUS_HOST, INVERTER_PROFILE
+
 cd src
 pip install -r requirements.txt
 python main.py
 ```
 
-Демо-ключ: `LICENSE_KEY=demo-business-key`, `SITE_ID=demo-site`
+Данные: `data/monitor.db` (по умолчанию). Логи: `logs/monitor.log`, `logs/error.log`.
 
-## Тарифы
+### USR-W610
 
-См. [docs/PRODUCT.md](docs/PRODUCT.md)
+- RS485 к инвертору (обычно 9600 8N1)
+- Режим **TCP Server (TCPS)**, **Local Port = 502**
+- В `.env`: `MODBUS_HOST` — IP модуля (часто `192.168.1.1`)
 
-## Установка у клиентов
+## Профили инверторов
 
-См. [docs/INSTALL.md](docs/INSTALL.md) — приоритет **канал A** (шлюз Raspberry Pi).
+`INVERTER_PROFILE`: `default`, `deye`, `goodwe`
 
-## Dev-отдел
-
-См. [docs/TEAM.md](docs/TEAM.md)
+При неверном значении агент завершится с ошибкой в логе.
 
 ## Тесты
 

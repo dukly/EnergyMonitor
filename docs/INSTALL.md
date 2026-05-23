@@ -1,56 +1,33 @@
-# Установка sunhors-agent у клиентов
+# Установка агента EnergyMonitor
 
-**Приоритетный канал:** **A — шлюз САНХОРС** (Raspberry Pi / мини-ПК).  
-Каналы B и C — для дома и IT-зрелых объектов.
+## Linux (шлюз / Raspberry Pi)
 
-## Канал A: шлюз «под ключ» (рекомендуется B2B)
-
-Скрипты: [`install/gateway/`](../install/gateway/)  
-**Закрытый репозиторий для Raspberry Pi:** `sunhors-agent-rpi` (рядом с EnergyMonitor, только пакет шлюза)
+Скрипты: [`install/gateway/`](../install/gateway/)
 
 | Шаг | Действие |
 |-----|----------|
-| 1 | Прошить образ / установить пакет агента на шлюз |
+| 1 | Скопировать репозиторий на устройство |
 | 2 | RS485 → USR-W610 → LAN, прописать `MODBUS_HOST` в `.env` |
-| 3 | Активация: `SITE_ID` + `LICENSE_KEY` (QR → portal) |
-| 4 | `sudo systemctl enable --now sunhors-agent` |
-| 5 | Проверить телеметрию в портале через 5–15 мин |
+| 3 | `sudo bash install/gateway/install.sh` |
+| 4 | Отредактировать `/opt/energy-monitor-agent/.env` |
+| 5 | `sudo systemctl enable --now energy-monitor-agent` |
 
-## Канал B: Windows на объекте
+## Windows
 
-Скрипт: [`install/windows/sunhors-install.ps1`](../install/windows/sunhors-install.ps1)
+Скрипт: [`install/windows/install.ps1`](../install/windows/install.ps1)
 
-- Установка Python-зависимостей и задачи Планировщика / службы
-- Мастер: IP USR-W610, лицензия
+## Docker
 
-## Канал C: Docker
+[`install/docker/docker-compose.yml`](../install/docker/docker-compose.yml) — `network_mode: host` для доступа к Modbus в LAN.
 
-Файл: [`install/docker/docker-compose.yml`](../install/docker/docker-compose.yml)
+## Проверка на объекте
 
-- Для NAS/сервера клиента, исходящий HTTPS 443
+- [ ] USR-W610: TCP Server, порт **502**
+- [ ] Ping `MODBUS_HOST` с хоста агента
+- [ ] В `logs/monitor.log` появляются строки `Measurement saved`
+- [ ] В SQLite есть новые строки: `SELECT * FROM measurements ORDER BY id DESC LIMIT 5;`
 
-## Runbook Field Solutions
+## Эскалация
 
-### До выезда
-
-- [ ] В портале создан объект (`SITE_ID`)
-- [ ] Выдан `LICENSE_KEY` и тариф
-- [ ] Известен тип инвертора → `INVERTER_PROFILE`
-
-### На объекте
-
-- [ ] USR-W610 в TCP Server, порт 502
-- [ ] Ping `MODBUS_HOST` с шлюза
-- [ ] `.env` скопирован из `.env.example`
-- [ ] Агент запущен, в `logs/monitor.log` нет ERROR
-
-### Сдача
-
-- [ ] В портале видна последняя точка телеметрии
-- [ ] Клиенту передан доступ в portal
-- [ ] Тикет закрыт с номером `site_id`
-
-### Эскалация в Edge-команду
-
-- Modbus timeout > 30 мин
-- Несовпадение регистров → смена `INVERTER_PROFILE` или новый профиль
+- Modbus timeout: проверить кабель RS485, unit ID, профиль `INVERTER_PROFILE`
+- Пустые значения: карта регистров не совпадает с инвертором — сменить профиль или добавить новый в `src/inverter_profiles/`

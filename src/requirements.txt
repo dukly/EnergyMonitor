@@ -1,3 +1,2 @@
 pymodbus==3.11.4
 pydantic-settings==2.7.1
-httpx==0.28.1

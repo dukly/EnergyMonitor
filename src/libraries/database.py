@@ -1,11 +1,9 @@
 import sqlite3
 from pathlib import Path
-from typing import Any
 
 from logger import logger
 
 SCHEMA_COLUMNS: dict[str, str] = {
-    'synced': 'INTEGER NOT NULL DEFAULT 0',
     'status_text': 'TEXT',
     'error_text': 'TEXT',
 }
@@ -40,8 +38,7 @@ class Database:
                 status INTEGER,
                 error INTEGER,
                 status_text TEXT,
-                error_text TEXT,
-                synced INTEGER NOT NULL DEFAULT 0
+                error_text TEXT
             )
         ''')
         self.conn.commit()
@@ -57,10 +54,6 @@ class Database:
         self.cur.execute('''
             CREATE INDEX IF NOT EXISTS idx_measurements_timestamp
             ON measurements(timestamp)
-        ''')
-        self.cur.execute('''
-            CREATE INDEX IF NOT EXISTS idx_measurements_synced
-            ON measurements(synced)
         ''')
         self.conn.commit()
 
@@ -96,8 +89,7 @@ class Database:
                 status INTEGER,
                 error INTEGER,
                 status_text TEXT,
-                error_text TEXT,
-                synced INTEGER NOT NULL DEFAULT 0
+                error_text TEXT
             )
         ''')
 
@@ -139,8 +131,8 @@ class Database:
         self.cur.execute('''
             INSERT INTO measurements (
                 timestamp, voltage_dc, current_dc, power_ac, temp, freq, pf,
-                energy_total, energy_day, runtime, status, error, status_text, error_text, synced
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                energy_total, energy_day, runtime, status, error, status_text, error_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             timestamp,
             voltage_dc,
@@ -167,27 +159,6 @@ class Database:
             )
         )
         return measurement_id
-
-    def get_unsynced_measurements(self, limit: int = 50) -> list[dict[str, Any]]:
-        self.cur.execute('''
-            SELECT id, timestamp, voltage_dc, current_dc, power_ac, temp, freq, pf,
-                   energy_total, energy_day, runtime, status, error, status_text, error_text
-            FROM measurements
-            WHERE synced = 0
-            ORDER BY id ASC
-            LIMIT ?
-        ''', (limit,))
-        return [dict(row) for row in self.cur.fetchall()]
-
-    def mark_measurements_synced(self, measurement_ids: list[int]) -> None:
-        if not measurement_ids:
-            return
-        placeholders = ', '.join('?' for _ in measurement_ids)
-        self.cur.execute(
-            f'UPDATE measurements SET synced = 1 WHERE id IN ({placeholders})',
-            measurement_ids,
-        )
-        self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()

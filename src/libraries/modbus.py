@@ -53,7 +53,7 @@ class ModbusClient:
 
     def ensure_connected(self, retries: int = 3) -> None:
         if not self.is_connected:
-            self.connect(retries=retries)
+            self.reconnect(retries=retries)
 
     @staticmethod
     def _decode_float32(high_register: int, low_register: int) -> float:

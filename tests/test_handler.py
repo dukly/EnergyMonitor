@@ -107,12 +107,11 @@ def test_database_adds_missing_columns_when_id_exists(tmp_path) -> None:
     columns = {row[1] for row in db.cur.execute('PRAGMA table_info(measurements)').fetchall()}
     assert 'status_text' in columns
     assert 'error_text' in columns
-    assert 'synced' in columns
     db.close()
 
 
 def test_database_creates_parent_directory(tmp_path) -> None:
-    db_path = tmp_path / 'nested' / 'data' / 'sunhors.db'
+    db_path = tmp_path / 'nested' / 'data' / 'monitor.db'
     db = Database(str(db_path))
     assert db_path.exists()
     db.close()

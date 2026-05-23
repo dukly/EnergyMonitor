@@ -5,32 +5,20 @@ from handler import handle_measurement
 from inverter_profiles import get_profile
 from libraries.database import Database
 from libraries.modbus import ModbusClient
-from license import LicenseClient
 from logger import logger
-from sync.cloud_uploader import CloudUploader
 
 
 def main() -> None:
-    profile = get_profile(settings.inverter_profile)
-    logger.info(f'Starting {settings.app_name} (profile={profile.name}, site={settings.site_id})...')
-
-    license_client = LicenseClient()
-    license_info = license_client.validate()
-    if not license_info.valid:
-        logger.error(f'Invalid license: {license_info.message}')
-        return
-    if license_client.is_expired(license_info.expires_at):
-        logger.error('License expired. Agent stopped.')
+    try:
+        profile = get_profile(settings.inverter_profile)
+    except ValueError as error:
+        logger.error(str(error))
         return
 
-    logger.info(
-        f'License OK: plan={license_info.plan}, cloud_sync={license_info.cloud_sync_enabled}, '
-        f'{license_info.message}'
-    )
+    logger.info(f'Starting {settings.app_name} (profile={profile.name})...')
 
     db = None
     client = None
-    uploader = CloudUploader(license_info)
 
     try:
         db = Database(settings.sqlite_database_path)
@@ -59,7 +47,6 @@ def main() -> None:
         while True:
             try:
                 handle_measurement(db, client)
-                uploader.sync_pending(db)
             except (ConnectionError, OSError) as error:
                 logger.error(f'Modbus connection lost: {error}. Retrying on next cycle.', exc_info=True)
                 client.close()
