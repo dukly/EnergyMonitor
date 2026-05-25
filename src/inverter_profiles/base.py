@@ -9,4 +9,5 @@ class InverterProfile:
     register_start: int
     register_count: int
     device_id: int = 1
+    register_kind: str = 'input'  # 'input' (FC04) or 'holding' (FC03)
     description: str = ''

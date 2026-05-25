@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     modbus_host: str = 'localhost'
     modbus_port: int = 502
     modbus_poll_interval: int = 5
+    modbus_timeout: float = 10.0
+    modbus_retries: int = 5
+    modbus_device_id: int | None = None
+    modbus_read_chunk_size: int = 10
 
     sqlite_database_path: str = 'data/monitor.db'
 

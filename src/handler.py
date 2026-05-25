@@ -26,17 +26,25 @@ def _is_empty_measurement(measurement: InverterMeasurement) -> bool:
 
 def handle_measurement(db: Database, client: ModbusClient) -> int | None:
     profile = get_profile(settings.inverter_profile)
-    client.device_id = profile.device_id
+    client.device_id = (
+        settings.modbus_device_id
+        if settings.modbus_device_id is not None
+        else profile.device_id
+    )
 
     client.ensure_connected(retries=3)
 
     measurement = client.read_measurement_block(
         start_address=profile.register_start,
         count=profile.register_count,
+        register_kind=profile.register_kind,
     )
 
     if _is_empty_measurement(measurement):
-        logger.error('All Modbus values are empty. Closing connection for reconnect on next cycle.')
+        logger.error(
+            'All Modbus values are empty (no valid register block). '
+            'Closing connection for reconnect on next cycle.',
+        )
         client.close()
         return None
 

@@ -5,5 +5,6 @@ PROFILE = InverterProfile(
     register_start=32000,
     register_count=20,
     device_id=1,
-    description='Deye hybrid/string (standard input block)',
+    register_kind='auto',
+    description='Deye / Sunsynk (auto: holding FC03, then input FC04)',
 )

@@ -20,9 +20,9 @@ def test_read_measurement_block_parses_registers() -> None:
     registers[19] = 0
 
     client = ModbusClient('localhost', 502)
-    client.read_registers_block = lambda start, count: registers
+    client.read_registers_block = lambda start, count, kind='input': registers
 
-    measurement = client.read_measurement_block(32000, 20)
+    measurement = client.read_measurement_block(32000, 20, register_kind='input')
 
     assert measurement.voltage_dc == 400.0
     assert measurement.status == 1
@@ -31,12 +31,50 @@ def test_read_measurement_block_parses_registers() -> None:
 
 def test_read_measurement_block_rejects_short_response() -> None:
     client = ModbusClient('localhost', 502)
-    client.read_registers_block = lambda start, count: [0, 1, 2]
+    client.read_registers_block = lambda start, count, kind='input': [0, 1, 2]
 
-    measurement = client.read_measurement_block(32000, 20)
+    measurement = client.read_measurement_block(32000, 20, register_kind='input')
 
     assert measurement.voltage_dc is None
     assert measurement.status is None
+
+
+def test_read_registers_block_auto_fallback() -> None:
+    client = ModbusClient('localhost', 502)
+
+    def fake_merged(start: int, count: int, kind: str) -> list[int] | None:
+        if kind == 'holding':
+            return None
+        return [0] * count
+
+    client._read_registers_merged = fake_merged  # type: ignore[method-assign]
+
+    registers = client.read_registers_block(32000, 20, register_kind='auto')
+
+    assert registers is not None
+    assert len(registers) == 20
+    assert client._preferred_register_kind == 'input'
+
+
+def test_read_registers_block_reads_in_chunks() -> None:
+    client = ModbusClient('localhost', 502)
+    chunk_calls: list[tuple[int, int, str]] = []
+
+    def fake_chunk(start: int, count: int, kind: str) -> list[int] | None:
+        chunk_calls.append((start, count, kind))
+        if count == 20:
+            return None
+        return [start + index for index in range(count)]
+
+    client._read_registers_chunk = fake_chunk  # type: ignore[method-assign]
+
+    registers = client.read_registers_block(32000, 20, register_kind='input')
+
+    assert registers is not None
+    assert len(registers) == 20
+    assert chunk_calls[0] == (32000, 20, 'input')
+    assert chunk_calls[1] == (32000, 10, 'input')
+    assert chunk_calls[2] == (32010, 10, 'input')
 
 
 def test_handler_closes_client_on_empty_measurement(tmp_path) -> None:

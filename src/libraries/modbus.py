@@ -2,8 +2,14 @@ import struct
 from dataclasses import dataclass
 
 from pymodbus.client import ModbusTcpClient
+from pymodbus.exceptions import ModbusIOException
 
+from config import settings
 from logger import logger
+
+REGISTER_KIND_HOLDING = 'holding'
+REGISTER_KIND_INPUT = 'input'
+REGISTER_KINDS = (REGISTER_KIND_HOLDING, REGISTER_KIND_INPUT)
 
 
 @dataclass
@@ -29,20 +35,39 @@ class ModbusClient:
     ERROR_OFFSET = 19
 
     def __init__(self, host: str, port: int, device_id: int = 1) -> None:
-        self.client = ModbusTcpClient(host, port=port)
+        self.host = host
+        self.port = port
         self.device_id = device_id
+        self._preferred_register_kind: str | None = None
+        self.client = ModbusTcpClient(
+            host,
+            port=port,
+            timeout=settings.modbus_timeout,
+            retries=settings.modbus_retries,
+        )
 
     @property
     def is_connected(self) -> bool:
         return bool(self.client.connected)
 
+    @property
+    def endpoint(self) -> str:
+        return f'{self.host}:{self.port}'
+
     def connect(self, retries: int = 3) -> bool:
         for attempt in range(retries):
             if self.client.connect():
+                logger.info(f'Modbus TCP connected to {self.endpoint}')
                 return True
-            logger.warning(f'Failed to connect to Modbus server (attempt {attempt + 1}/{retries})')
+            logger.warning(
+                f'Failed to connect to Modbus at {self.endpoint} '
+                f'(attempt {attempt + 1}/{retries})',
+            )
 
-        raise ConnectionError(f'Unable to connect to Modbus server after {retries} attempts')
+        raise ConnectionError(
+            f'Unable to connect to Modbus at {self.endpoint} after {retries} attempts. '
+            'Check MODBUS_HOST/MODBUS_PORT, USR-W610 TCP Server mode, and Local Port 502.',
+        )
 
     def close(self) -> None:
         self.client.close()
@@ -63,29 +88,121 @@ class ModbusClient:
             raise struct.error('decoded NaN')
         return value
 
-    def read_registers_block(self, start_address: int, count: int) -> list[int] | None:
+    def _register_kinds_to_try(self, register_kind: str) -> list[str]:
+        kind = register_kind.strip().lower()
+        if kind == 'auto':
+            kinds = list(REGISTER_KINDS)
+        elif kind in REGISTER_KINDS:
+            kinds = [kind]
+        else:
+            logger.warning(f'Unknown register kind "{register_kind}", using input registers')
+            kinds = [REGISTER_KIND_INPUT]
+
+        preferred = self._preferred_register_kind
+        if preferred and preferred in kinds:
+            return [preferred] + [item for item in kinds if item != preferred]
+        return kinds
+
+    def _read_registers_chunk(
+        self,
+        start_address: int,
+        count: int,
+        register_kind: str,
+    ) -> list[int] | None:
         try:
-            result = self.client.read_input_registers(
-                address=start_address,
-                count=count,
-                device_id=self.device_id,
+            if register_kind == REGISTER_KIND_HOLDING:
+                result = self.client.read_holding_registers(
+                    address=start_address,
+                    count=count,
+                    device_id=self.device_id,
+                )
+            else:
+                result = self.client.read_input_registers(
+                    address=start_address,
+                    count=count,
+                    device_id=self.device_id,
+                )
+        except ModbusIOException as error:
+            logger.warning(
+                f'No Modbus response ({register_kind}) at {start_address}+{count} '
+                f'on {self.endpoint}, unit={self.device_id}: {error}. '
+                'If TCP is OK, check RS485 wiring, inverter power, and slave ID.',
             )
+            return None
         except Exception as error:
-            logger.warning(f'Ignoring error reading register block at {start_address}: {error}', exc_info=True)
+            logger.warning(
+                f'Error reading {register_kind} registers at {start_address} '
+                f'from {self.endpoint}: {error}',
+            )
             return None
 
         if result.isError():
-            logger.warning(f'Ignoring Modbus error reading register block at {start_address}: {result}')
+            logger.warning(
+                f'Modbus error reading {register_kind} registers at {start_address} '
+                f'from {self.endpoint}: {result}',
+            )
             return None
 
         registers = list(result.registers)
         if len(registers) < count:
             logger.warning(
-                f'Incomplete Modbus block at {start_address}: expected {count}, got {len(registers)}',
+                f'Incomplete Modbus block at {start_address} ({register_kind}): '
+                f'expected {count}, got {len(registers)} from {self.endpoint}',
             )
             return None
 
         return registers
+
+    def _read_registers_merged(
+        self,
+        start_address: int,
+        count: int,
+        register_kind: str,
+    ) -> list[int] | None:
+        full_block = self._read_registers_chunk(start_address, count, register_kind)
+        if full_block is not None:
+            return full_block
+
+        chunk_size = max(1, settings.modbus_read_chunk_size)
+        if count <= chunk_size:
+            return None
+
+        merged: list[int] = []
+        offset = 0
+        while offset < count:
+            piece_count = min(chunk_size, count - offset)
+            piece = self._read_registers_chunk(
+                start_address + offset,
+                piece_count,
+                register_kind,
+            )
+            if piece is None:
+                return None
+            merged.extend(piece)
+            offset += piece_count
+
+        return merged
+
+    def read_registers_block(
+        self,
+        start_address: int,
+        count: int,
+        register_kind: str = REGISTER_KIND_INPUT,
+    ) -> list[int] | None:
+        for kind in self._register_kinds_to_try(register_kind):
+            registers = self._read_registers_merged(start_address, count, kind)
+            if registers is None:
+                continue
+
+            if self._preferred_register_kind != kind:
+                logger.info(
+                    f'Modbus read OK via {kind} registers '
+                    f'(unit={self.device_id}, start={start_address}, count={count})',
+                )
+            self._preferred_register_kind = kind
+            return registers
+
+        return None
 
     def read_float32(self, registers: list[int] | None, offset: int, address: int) -> float | None:
         if registers is None:
@@ -107,15 +224,21 @@ class ModbusClient:
             logger.warning(f'Ignoring error decoding int16 at address {address}: {error}')
             return None
 
-    def read_measurement_block(self, start_address: int, count: int) -> InverterMeasurement:
-        registers = self.read_registers_block(start_address, count)
+    def read_measurement_block(
+        self,
+        start_address: int,
+        count: int,
+        register_kind: str = REGISTER_KIND_INPUT,
+    ) -> InverterMeasurement:
+        registers = self.read_registers_block(start_address, count, register_kind)
 
         if registers is None:
             return InverterMeasurement(None, None, None, None, None, None, None, None, None, None, None)
 
         if len(registers) < count or count < self.ERROR_OFFSET + 1:
             logger.warning(
-                f'Register block too short: start={start_address}, expected={count}, got={len(registers)}',
+                f'Register block too short: start={start_address}, kind={register_kind}, '
+                f'expected={count}, got={len(registers)}',
             )
             return InverterMeasurement(None, None, None, None, None, None, None, None, None, None, None)
 
