@@ -87,6 +87,99 @@ def test_database_migration_from_legacy_schema(tmp_path) -> None:
     db.close()
 
 
+def test_database_recovers_orphaned_legacy_table(tmp_path) -> None:
+    db_path = tmp_path / 'orphaned_legacy.db'
+    conn = __import__('sqlite3').connect(db_path)
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE measurements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            voltage_dc REAL,
+            current_dc REAL,
+            power_ac REAL,
+            temp REAL,
+            freq REAL,
+            pf REAL,
+            energy_total REAL,
+            energy_day REAL,
+            runtime REAL,
+            status INTEGER,
+            error INTEGER,
+            status_text TEXT,
+            error_text TEXT
+        )
+    ''')
+    cur.execute('''
+        CREATE TABLE measurements_legacy (
+            timestamp TEXT,
+            voltage_dc REAL,
+            current_dc REAL,
+            power_ac REAL,
+            temp REAL,
+            freq REAL,
+            pf REAL,
+            energy_total REAL,
+            energy_day REAL,
+            runtime REAL,
+            status INTEGER,
+            error INTEGER
+        )
+    ''')
+    cur.execute('''
+        INSERT INTO measurements_legacy (
+            timestamp, voltage_dc, current_dc, power_ac, temp, freq, pf,
+            energy_total, energy_day, runtime, status, error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0,
+    ))
+    conn.commit()
+    conn.close()
+
+    db = Database(str(db_path))
+    db.cur.execute('SELECT COUNT(*) FROM measurements')
+    assert db.cur.fetchone()[0] == 1
+    db.cur.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'measurements_legacy'",
+    )
+    assert db.cur.fetchone() is None
+    db.close()
+
+
+def test_database_preserves_unsupported_legacy_schema(tmp_path) -> None:
+    db_path = tmp_path / 'unsupported_legacy.db'
+    conn = __import__('sqlite3').connect(db_path)
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE measurements (
+            created_at TEXT,
+            watts REAL
+        )
+    ''')
+    cur.execute("INSERT INTO measurements (created_at, watts) VALUES ('2026-05-29 11:00:00', 1000)")
+    conn.commit()
+    conn.close()
+
+    try:
+        Database(str(db_path))
+    except RuntimeError as error:
+        assert 'missing timestamp' in str(error)
+    else:
+        raise AssertionError('Unsupported legacy schema should stop before dropping data')
+
+    conn = __import__('sqlite3').connect(db_path)
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'measurements'")
+    assert cur.fetchone() is not None
+    cur.execute('SELECT COUNT(*) FROM measurements')
+    assert cur.fetchone()[0] == 1
+    cur.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'measurements_legacy'")
+    assert cur.fetchone() is None
+    conn.close()
+
+
 def test_database_adds_missing_columns_when_id_exists(tmp_path) -> None:
     db_path = tmp_path / 'partial.db'
     conn = __import__('sqlite3').connect(db_path)

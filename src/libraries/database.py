@@ -8,6 +8,21 @@ SCHEMA_COLUMNS: dict[str, str] = {
     'error_text': 'TEXT',
 }
 
+MEASUREMENT_COLUMNS: tuple[str, ...] = (
+    'timestamp',
+    'voltage_dc',
+    'current_dc',
+    'power_ac',
+    'temp',
+    'freq',
+    'pf',
+    'energy_total',
+    'energy_day',
+    'runtime',
+    'status',
+    'error',
+)
+
 
 class Database:
     """SQLite storage for inverter measurements."""
@@ -22,30 +37,15 @@ class Database:
         self._initialize_database()
 
     def _initialize_database(self) -> None:
-        self.cur.execute('''
-            CREATE TABLE IF NOT EXISTS measurements (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                voltage_dc REAL,
-                current_dc REAL,
-                power_ac REAL,
-                temp REAL,
-                freq REAL,
-                pf REAL,
-                energy_total REAL,
-                energy_day REAL,
-                runtime REAL,
-                status INTEGER,
-                error INTEGER,
-                status_text TEXT,
-                error_text TEXT
-            )
-        ''')
+        self._create_measurements_table(if_not_exists=True)
         self.conn.commit()
 
         columns = self._table_columns()
 
-        if 'id' not in columns:
+        if self._table_exists('measurements_legacy'):
+            self._recover_legacy_table(columns)
+            columns = self._table_columns()
+        elif 'id' not in columns:
             self._migrate_legacy_table(columns)
             columns = self._table_columns()
 
@@ -61,20 +61,17 @@ class Database:
         self.cur.execute('PRAGMA table_info(measurements)')
         return {row[1] for row in self.cur.fetchall()}
 
-    def _ensure_columns(self, columns: set[str]) -> None:
-        for column_name, column_type in SCHEMA_COLUMNS.items():
-            if column_name in columns:
-                continue
-            self.cur.execute(f'ALTER TABLE measurements ADD COLUMN {column_name} {column_type}')
-            self.conn.commit()
-            logger.info(f'Added missing column: {column_name}')
+    def _table_exists(self, table_name: str) -> bool:
+        self.cur.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        )
+        return self.cur.fetchone() is not None
 
-    def _migrate_legacy_table(self, columns: set[str]) -> None:
-        logger.info('Migrating legacy measurements table to the new schema')
-
-        self.cur.execute('ALTER TABLE measurements RENAME TO measurements_legacy')
-        self.cur.execute('''
-            CREATE TABLE measurements (
+    def _create_measurements_table(self, if_not_exists: bool = False) -> None:
+        clause = 'IF NOT EXISTS ' if if_not_exists else ''
+        self.cur.execute(f'''
+            CREATE TABLE {clause}measurements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
                 voltage_dc REAL,
@@ -93,23 +90,62 @@ class Database:
             )
         ''')
 
-        legacy_columns = [
-            column for column in (
-                'timestamp', 'voltage_dc', 'current_dc', 'power_ac', 'temp', 'freq', 'pf',
-                'energy_total', 'energy_day', 'runtime', 'status', 'error',
-            )
-            if column in columns
-        ]
-        if legacy_columns:
-            column_list = ', '.join(legacy_columns)
-            self.cur.execute(f'''
-                INSERT INTO measurements ({column_list})
-                SELECT {column_list}
-                FROM measurements_legacy
-            ''')
+    def _ensure_columns(self, columns: set[str]) -> None:
+        for column_name, column_type in SCHEMA_COLUMNS.items():
+            if column_name in columns:
+                continue
+            self.cur.execute(f'ALTER TABLE measurements ADD COLUMN {column_name} {column_type}')
+            self.conn.commit()
+            logger.info(f'Added missing column: {column_name}')
 
-        self.cur.execute('DROP TABLE measurements_legacy')
-        self.conn.commit()
+    def _migrate_legacy_table(self, columns: set[str]) -> None:
+        logger.info('Migrating legacy measurements table to the new schema')
+
+        self.cur.execute('BEGIN IMMEDIATE')
+        try:
+            self.cur.execute('ALTER TABLE measurements RENAME TO measurements_legacy')
+            self._create_measurements_table()
+            self._copy_legacy_measurements('measurements_legacy', columns)
+            self.cur.execute('DROP TABLE measurements_legacy')
+        except Exception:
+            self.conn.rollback()
+            raise
+        else:
+            self.conn.commit()
+
+    def _recover_legacy_table(self, columns: set[str]) -> None:
+        if 'id' not in columns:
+            raise RuntimeError(
+                'Found measurements_legacy while measurements still uses a legacy schema; '
+                'manual recovery is required'
+            )
+
+        logger.info('Recovering rows from orphaned legacy measurements table')
+        self.cur.execute('BEGIN IMMEDIATE')
+        try:
+            self.cur.execute('PRAGMA table_info(measurements_legacy)')
+            legacy_columns = {row[1] for row in self.cur.fetchall()}
+            self._copy_legacy_measurements('measurements_legacy', legacy_columns)
+            self.cur.execute('DROP TABLE measurements_legacy')
+        except Exception:
+            self.conn.rollback()
+            raise
+        else:
+            self.conn.commit()
+
+    def _copy_legacy_measurements(self, table_name: str, columns: set[str]) -> None:
+        legacy_columns = [column for column in MEASUREMENT_COLUMNS if column in columns]
+        if 'timestamp' not in legacy_columns:
+            raise RuntimeError(
+                f'Legacy table {table_name} is missing timestamp; preserving it for manual recovery'
+            )
+
+        column_list = ', '.join(legacy_columns)
+        self.cur.execute(f'''
+            INSERT INTO measurements ({column_list})
+            SELECT {column_list}
+            FROM {table_name}
+        ''')
 
     def save_measurement(
         self,
