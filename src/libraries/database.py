@@ -8,6 +8,23 @@ SCHEMA_COLUMNS: dict[str, str] = {
     'error_text': 'TEXT',
 }
 
+MEASUREMENT_DATA_COLUMNS: tuple[str, ...] = (
+    'timestamp',
+    'voltage_dc',
+    'current_dc',
+    'power_ac',
+    'temp',
+    'freq',
+    'pf',
+    'energy_total',
+    'energy_day',
+    'runtime',
+    'status',
+    'error',
+)
+
+MEASUREMENT_TABLES = {'measurements', 'measurements_legacy'}
+
 
 class Database:
     """SQLite storage for inverter measurements."""
@@ -22,6 +39,31 @@ class Database:
         self._initialize_database()
 
     def _initialize_database(self) -> None:
+        legacy_table_exists = self._table_exists('measurements_legacy')
+        if legacy_table_exists:
+            logger.warning('Found legacy measurements table. Resuming interrupted migration.')
+
+        self._create_measurements_table()
+        self.conn.commit()
+
+        if legacy_table_exists:
+            self._recover_legacy_table()
+
+        columns = self._table_columns()
+
+        if 'id' not in columns:
+            self._migrate_legacy_table(columns)
+            columns = self._table_columns()
+
+        self._ensure_columns(columns)
+
+        self.cur.execute('''
+            CREATE INDEX IF NOT EXISTS idx_measurements_timestamp
+            ON measurements(timestamp)
+        ''')
+        self.conn.commit()
+
+    def _create_measurements_table(self) -> None:
         self.cur.execute('''
             CREATE TABLE IF NOT EXISTS measurements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,24 +83,19 @@ class Database:
                 error_text TEXT
             )
         ''')
-        self.conn.commit()
 
-        columns = self._table_columns()
+    def _table_exists(self, table_name: str) -> bool:
+        self.cur.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        )
+        return self.cur.fetchone() is not None
 
-        if 'id' not in columns:
-            self._migrate_legacy_table(columns)
-            columns = self._table_columns()
+    def _table_columns(self, table_name: str = 'measurements') -> set[str]:
+        if table_name not in MEASUREMENT_TABLES:
+            raise ValueError(f'Unsupported measurements table: {table_name}')
 
-        self._ensure_columns(columns)
-
-        self.cur.execute('''
-            CREATE INDEX IF NOT EXISTS idx_measurements_timestamp
-            ON measurements(timestamp)
-        ''')
-        self.conn.commit()
-
-    def _table_columns(self) -> set[str]:
-        self.cur.execute('PRAGMA table_info(measurements)')
+        self.cur.execute(f'PRAGMA table_info({table_name})')
         return {row[1] for row in self.cur.fetchall()}
 
     def _ensure_columns(self, columns: set[str]) -> None:
@@ -72,44 +109,64 @@ class Database:
     def _migrate_legacy_table(self, columns: set[str]) -> None:
         logger.info('Migrating legacy measurements table to the new schema')
 
-        self.cur.execute('ALTER TABLE measurements RENAME TO measurements_legacy')
-        self.cur.execute('''
-            CREATE TABLE measurements (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                voltage_dc REAL,
-                current_dc REAL,
-                power_ac REAL,
-                temp REAL,
-                freq REAL,
-                pf REAL,
-                energy_total REAL,
-                energy_day REAL,
-                runtime REAL,
-                status INTEGER,
-                error INTEGER,
-                status_text TEXT,
-                error_text TEXT
-            )
-        ''')
+        self.conn.execute('BEGIN IMMEDIATE')
+        try:
+            self.cur.execute('ALTER TABLE measurements RENAME TO measurements_legacy')
+            self._create_measurements_table()
+            self._copy_legacy_rows(columns)
+            self.cur.execute('DROP TABLE measurements_legacy')
+        except Exception:
+            self.conn.rollback()
+            raise
 
-        legacy_columns = [
-            column for column in (
-                'timestamp', 'voltage_dc', 'current_dc', 'power_ac', 'temp', 'freq', 'pf',
-                'energy_total', 'energy_day', 'runtime', 'status', 'error',
-            )
-            if column in columns
-        ]
-        if legacy_columns:
-            column_list = ', '.join(legacy_columns)
+        self.conn.commit()
+
+    def _recover_legacy_table(self) -> None:
+        legacy_columns = self._table_columns('measurements_legacy')
+
+        self.conn.execute('BEGIN IMMEDIATE')
+        try:
+            self._copy_legacy_rows(legacy_columns, skip_existing=True)
+            self.cur.execute('DROP TABLE measurements_legacy')
+        except Exception:
+            self.conn.rollback()
+            raise
+
+        self.conn.commit()
+
+    def _copy_legacy_rows(self, columns: set[str], skip_existing: bool = False) -> None:
+        legacy_columns = [column for column in MEASUREMENT_DATA_COLUMNS if column in columns]
+        self.cur.execute('SELECT COUNT(*) FROM measurements_legacy')
+        legacy_row_count = int(self.cur.fetchone()[0])
+
+        if legacy_row_count > 0 and 'timestamp' not in legacy_columns:
+            raise RuntimeError('Cannot migrate non-empty legacy measurements table without timestamp column')
+
+        if not legacy_columns:
+            return
+
+        column_list = ', '.join(legacy_columns)
+        if not skip_existing:
             self.cur.execute(f'''
                 INSERT INTO measurements ({column_list})
                 SELECT {column_list}
                 FROM measurements_legacy
             ''')
+            return
 
-        self.cur.execute('DROP TABLE measurements_legacy')
-        self.conn.commit()
+        match_conditions = ' AND '.join(
+            f'current.{column} IS legacy.{column}' for column in legacy_columns
+        )
+        self.cur.execute(f'''
+            INSERT INTO measurements ({column_list})
+            SELECT {column_list}
+            FROM measurements_legacy AS legacy
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM measurements AS current
+                WHERE {match_conditions}
+            )
+        ''')
 
     def save_measurement(
         self,
