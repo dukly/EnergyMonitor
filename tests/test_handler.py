@@ -1,5 +1,8 @@
+import sqlite3
 from datetime import datetime
 from unittest.mock import MagicMock
+
+import pytest
 
 from handler import handle_measurement
 from libraries.database import Database
@@ -84,6 +87,96 @@ def test_database_migration_from_legacy_schema(tmp_path) -> None:
 
     db.cur.execute('SELECT COUNT(*) FROM measurements')
     assert db.cur.fetchone()[0] == 1
+    db.close()
+
+
+def test_database_migration_rolls_back_on_failure(tmp_path) -> None:
+    db_path = tmp_path / 'legacy-failure.db'
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE measurements (
+            timestamp TEXT,
+            voltage_dc REAL
+        )
+    ''')
+    cur.execute(
+        'INSERT INTO measurements (timestamp, voltage_dc) VALUES (?, ?)',
+        ('2026-01-01 00:00:00', 230.0),
+    )
+    conn.commit()
+    conn.close()
+
+    class FailingDatabase(Database):
+        def _copy_legacy_measurements(self, legacy_columns: set[str]) -> None:
+            raise RuntimeError('copy failed')
+
+    with pytest.raises(RuntimeError):
+        FailingDatabase(str(db_path))
+
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'measurements_legacy'")
+    assert cur.fetchone() is None
+    cur.execute('PRAGMA table_info(measurements)')
+    columns = {row[1] for row in cur.fetchall()}
+    assert 'id' not in columns
+    cur.execute('SELECT timestamp, voltage_dc FROM measurements')
+    assert cur.fetchall() == [('2026-01-01 00:00:00', 230.0)]
+    conn.close()
+
+
+def test_database_recovers_interrupted_legacy_migration(tmp_path) -> None:
+    db_path = tmp_path / 'interrupted.db'
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE measurements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            voltage_dc REAL,
+            current_dc REAL,
+            power_ac REAL,
+            temp REAL,
+            freq REAL,
+            pf REAL,
+            energy_total REAL,
+            energy_day REAL,
+            runtime REAL,
+            status INTEGER,
+            error INTEGER,
+            status_text TEXT,
+            error_text TEXT
+        )
+    ''')
+    cur.execute('''
+        CREATE TABLE measurements_legacy (
+            timestamp TEXT,
+            voltage_dc REAL,
+            status INTEGER,
+            error INTEGER
+        )
+    ''')
+    cur.execute(
+        'INSERT INTO measurements (timestamp, voltage_dc, status, error) VALUES (?, ?, ?, ?)',
+        ('2026-01-02 00:00:00', 240.0, 1, 0),
+    )
+    cur.execute(
+        'INSERT INTO measurements_legacy (timestamp, voltage_dc, status, error) VALUES (?, ?, ?, ?)',
+        ('2026-01-01 00:00:00', 230.0, 1, 0),
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(str(db_path))
+    db.cur.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'measurements_legacy'")
+    assert db.cur.fetchone() is None
+    db.cur.execute('SELECT timestamp, voltage_dc FROM measurements ORDER BY timestamp')
+    rows = [(row[0], row[1]) for row in db.cur.fetchall()]
+    assert rows == [
+        ('2026-01-01 00:00:00', 230.0),
+        ('2026-01-02 00:00:00', 240.0),
+    ]
     db.close()
 
 
