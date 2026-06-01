@@ -27,10 +27,15 @@ def main() -> None:
         logger.error(f'Failed to initialize database: {error}', exc_info=True)
         return
 
+    device_id = (
+        settings.modbus_device_id
+        if settings.modbus_device_id is not None
+        else profile.device_id
+    )
     client = ModbusClient(
         settings.modbus_host,
         settings.modbus_port,
-        device_id=profile.device_id,
+        device_id=device_id,
     )
 
     try:

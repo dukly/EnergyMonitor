@@ -16,6 +16,10 @@
 
 Скрипт: [`install/windows/install.ps1`](../install/windows/install.ps1)
 
+## Тестирование
+
+Подробный чеклист автотестов и полевого теста: [`docs/TESTING.md`](TESTING.md)
+
 ## Проверка на объекте
 
 - [ ] USR-W610: TCP Server, порт **502**

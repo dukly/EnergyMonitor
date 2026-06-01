@@ -16,7 +16,7 @@
 
 ```bash
 copy .env.example .env
-# Отредактируйте MODBUS_HOST, INVERTER_PROFILE
+# Отредактируйте MODBUS_HOST, INVERTER_PROFILE, MODBUS_DEVICE_ID
 
 cd src
 pip install -r requirements.txt
@@ -36,6 +36,32 @@ python main.py
 `INVERTER_PROFILE`: `default`, `deye`, `goodwe`
 
 При неверном значении агент завершится с ошибкой в логе.
+
+## Переменные окружения
+
+| Переменная | По умолчанию | Назначение |
+|------------|--------------|------------|
+| `INVERTER_PROFILE` | `default` | Профиль карты регистров (`default`, `deye`, `goodwe`) |
+| `MODBUS_HOST` | `192.168.1.1` | IP USR-W610 |
+| `MODBUS_PORT` | `502` | TCP-порт Modbus |
+| `MODBUS_POLL_INTERVAL` | `5` | Интервал опроса, секунды |
+| `MODBUS_TIMEOUT` | `10` | Таймаут Modbus-запроса, секунды |
+| `MODBUS_RETRIES` | `5` | Число ретраев Modbus-клиента |
+| `MODBUS_DEVICE_ID` | `1` | Unit/slave ID на RS485 (если пусто, берётся из профиля) |
+| `MODBUS_READ_CHUNK_SIZE` | `10` | Размер блока для чтения частями при fallback |
+| `SQLITE_DATABASE_PATH` | `data/monitor.db` | Путь к SQLite |
+| `LOG_FILE_PATH` | `logs/monitor.log` | Основной лог |
+| `ERROR_LOG_FILE_PATH` | `logs/error.log` | Лог ошибок |
+
+Полный пример — в `.env.example`.
+
+## Быстрый smoke-тест
+
+```bash
+pip install -r src/requirements.txt -r requirements-dev.txt
+pytest
+flake8 src tests
+```
 
 ## Тесты
 
