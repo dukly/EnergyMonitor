@@ -1,5 +1,8 @@
 from datetime import datetime
+import sqlite3
 from unittest.mock import MagicMock
+
+import pytest
 
 from handler import handle_measurement
 from libraries.database import Database
@@ -46,7 +49,7 @@ def test_handle_measurement_saves_row(tmp_path) -> None:
 
 def test_database_migration_from_legacy_schema(tmp_path) -> None:
     db_path = tmp_path / 'legacy.db'
-    conn = __import__('sqlite3').connect(db_path)
+    conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     cur.execute('''
         CREATE TABLE measurements (
@@ -87,9 +90,111 @@ def test_database_migration_from_legacy_schema(tmp_path) -> None:
     db.close()
 
 
+def test_database_recovers_interrupted_legacy_migration(tmp_path) -> None:
+    db_path = tmp_path / 'interrupted.db'
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE measurements_legacy (
+            timestamp TEXT,
+            voltage_dc REAL,
+            current_dc REAL,
+            power_ac REAL,
+            temp REAL,
+            freq REAL,
+            pf REAL,
+            energy_total REAL,
+            energy_day REAL,
+            runtime REAL,
+            status INTEGER,
+            error INTEGER
+        )
+    ''')
+    cur.execute('''
+        CREATE TABLE measurements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            voltage_dc REAL,
+            current_dc REAL,
+            power_ac REAL,
+            temp REAL,
+            freq REAL,
+            pf REAL,
+            energy_total REAL,
+            energy_day REAL,
+            runtime REAL,
+            status INTEGER,
+            error INTEGER,
+            status_text TEXT,
+            error_text TEXT
+        )
+    ''')
+    cur.execute('''
+        INSERT INTO measurements_legacy (
+            timestamp, voltage_dc, current_dc, power_ac, temp, freq, pf,
+            energy_total, energy_day, runtime, status, error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        '2026-06-01 10:00:00',
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0,
+    ))
+    cur.execute('''
+        INSERT INTO measurements (
+            timestamp, voltage_dc, current_dc, power_ac, temp, freq, pf,
+            energy_total, energy_day, runtime, status, error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        '2026-06-01 10:01:00',
+        10, 20, 30, 40, 50, 60, 70, 80, 90, 1, 0,
+    ))
+    conn.commit()
+    conn.close()
+
+    db = Database(str(db_path))
+
+    db.cur.execute('SELECT COUNT(*) FROM measurements')
+    assert db.cur.fetchone()[0] == 2
+    assert not db._table_exists('measurements_legacy')
+
+    db.cur.execute('SELECT voltage_dc FROM measurements WHERE timestamp = ?', ('2026-06-01 10:00:00',))
+    assert db.cur.fetchone()[0] == 1
+    db.close()
+
+
+def test_database_keeps_unsupported_legacy_schema_on_migration_failure(tmp_path) -> None:
+    db_path = tmp_path / 'unsupported.db'
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE measurements (
+            measured_at TEXT,
+            watts REAL
+        )
+    ''')
+    cur.execute(
+        'INSERT INTO measurements (measured_at, watts) VALUES (?, ?)',
+        ('2026-06-01 10:00:00', 1000),
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RuntimeError, match='without a timestamp column'):
+        Database(str(db_path))
+
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'measurements'")
+    assert cur.fetchone() is not None
+    cur.execute('SELECT measured_at, watts FROM measurements')
+    assert cur.fetchone() == ('2026-06-01 10:00:00', 1000)
+    cur.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'measurements_legacy'")
+    assert cur.fetchone() is None
+    conn.close()
+
+
 def test_database_adds_missing_columns_when_id_exists(tmp_path) -> None:
     db_path = tmp_path / 'partial.db'
-    conn = __import__('sqlite3').connect(db_path)
+    conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     cur.execute('''
         CREATE TABLE measurements (
