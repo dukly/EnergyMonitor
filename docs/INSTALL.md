@@ -16,10 +16,6 @@
 
 Скрипт: [`install/windows/install.ps1`](../install/windows/install.ps1)
 
-## Docker
-
-[`install/docker/docker-compose.yml`](../install/docker/docker-compose.yml) — `network_mode: host` для доступа к Modbus в LAN.
-
 ## Проверка на объекте
 
 - [ ] USR-W610: TCP Server, порт **502**
