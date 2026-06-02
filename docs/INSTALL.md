@@ -12,6 +12,18 @@
 | 4 | Отредактировать `/opt/energy-monitor-agent/.env` |
 | 5 | `sudo systemctl enable --now energy-monitor-agent` |
 
+## Docker (отдельный способ установки)
+
+Файлы: [`install/docker/`](../install/docker/)
+
+| Шаг | Действие |
+|-----|----------|
+| 1 | Убедиться, что установлены Docker и Docker Compose Plugin |
+| 2 | `bash install/docker/install.sh` (создаст `.env`, `data/`, `logs/`) |
+| 3 | Отредактировать `install/docker/.env` |
+| 4 | `docker compose -f install/docker/docker-compose.yml up -d --build` |
+| 5 | Проверить логи: `docker compose -f install/docker/docker-compose.yml logs -f` |
+
 ## Windows
 
 Скрипт: [`install/windows/install.ps1`](../install/windows/install.ps1)

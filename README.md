@@ -10,6 +10,7 @@
 | [`src/inverter_profiles/`](src/inverter_profiles/) | Карты регистров (default, deye, goodwe) |
 | [`install/gateway/`](install/gateway/) | Установка на Linux (systemd) |
 | [`install/windows/`](install/windows/) | Установка на Windows (Планировщик задач) |
+| [`install/docker/`](install/docker/) | Установка через Docker Compose |
 | [`docs/INSTALL.md`](docs/INSTALL.md) | Краткий runbook установки |
 
 ## Быстрый старт
