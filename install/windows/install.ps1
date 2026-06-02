@@ -24,7 +24,14 @@ ERROR_LOG_FILE_PATH=logs/error.log
 Set-Content -Path "$InstallDir\.env" -Value $envContent -Encoding UTF8
 
 python -m venv "$InstallDir\venv"
-& "$InstallDir\venv\Scripts\pip.exe" install -r "$InstallDir\src\requirements.txt"
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& "$InstallDir\venv\Scripts\pip.exe" install -r "$InstallDir\src\requirements.txt" --disable-pip-version-check
+$pipExitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousErrorActionPreference
+if ($pipExitCode -ne 0) {
+    throw "pip install failed with exit code $pipExitCode"
+}
 
 $action = New-ScheduledTaskAction -Execute "$InstallDir\venv\Scripts\python.exe" -Argument "$InstallDir\src\main.py" -WorkingDirectory $InstallDir
 $trigger = New-ScheduledTaskTrigger -AtStartup
