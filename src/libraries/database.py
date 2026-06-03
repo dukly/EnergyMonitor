@@ -123,7 +123,7 @@ class Database:
 
         self.cur.execute('BEGIN IMMEDIATE')
         try:
-            copied_rows = self._copy_legacy_rows(columns)
+            copied_rows = self._copy_missing_legacy_rows(columns)
             self.cur.execute('DROP TABLE measurements_legacy')
         except Exception:
             self.conn.rollback()
@@ -136,11 +136,11 @@ class Database:
         self.cur.execute('SELECT COUNT(*) FROM measurements_legacy')
         return int(self.cur.fetchone()[0])
 
-    def _copy_legacy_rows(self, source_columns: set[str]) -> int:
-        row_count = self._legacy_row_count()
-        if row_count == 0:
-            return 0
+    def _measurement_row_count(self) -> int:
+        self.cur.execute('SELECT COUNT(*) FROM measurements')
+        return int(self.cur.fetchone()[0])
 
+    def _legacy_copy_columns(self, source_columns: set[str]) -> list[str]:
         target_columns = self._table_columns()
         legacy_columns = [
             column for column in MEASUREMENT_DATA_COLUMNS
@@ -163,6 +163,15 @@ class Database:
                 f'columns: {", ".join(dropped_columns)}'
             )
 
+        return legacy_columns
+
+    def _copy_legacy_rows(self, source_columns: set[str]) -> int:
+        row_count = self._legacy_row_count()
+        if row_count == 0:
+            return 0
+
+        legacy_columns = self._legacy_copy_columns(source_columns)
+
         column_list = ', '.join(legacy_columns)
         self.cur.execute(f'''
             INSERT INTO measurements ({column_list})
@@ -170,6 +179,50 @@ class Database:
             FROM measurements_legacy
         ''')
         return row_count
+
+    def _copy_missing_legacy_rows(self, source_columns: set[str]) -> int:
+        row_count = self._legacy_row_count()
+        if row_count == 0:
+            return 0
+
+        legacy_columns = self._legacy_copy_columns(source_columns)
+        column_list = ', '.join(legacy_columns)
+        select_columns = ', '.join(f'l.{column}' for column in legacy_columns)
+        match_conditions = ' AND '.join(
+            f't.{column} IS l.{column}' for column in legacy_columns
+        )
+        target_count_before = self._measurement_row_count()
+
+        self.cur.execute(f'''
+            WITH legacy_rows AS (
+                SELECT
+                    {column_list},
+                    ROW_NUMBER() OVER (
+                        PARTITION BY {column_list}
+                        ORDER BY rowid
+                    ) AS duplicate_index
+                FROM measurements_legacy
+            ),
+            target_rows AS (
+                SELECT
+                    {column_list},
+                    ROW_NUMBER() OVER (
+                        PARTITION BY {column_list}
+                        ORDER BY rowid
+                    ) AS duplicate_index
+                FROM measurements
+            )
+            INSERT INTO measurements ({column_list})
+            SELECT {select_columns}
+            FROM legacy_rows AS l
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM target_rows AS t
+                WHERE t.duplicate_index = l.duplicate_index
+                    AND {match_conditions}
+            )
+        ''')
+        return self._measurement_row_count() - target_count_before
 
     def save_measurement(
         self,
