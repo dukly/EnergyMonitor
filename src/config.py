@@ -50,5 +50,12 @@ class Settings(BaseSettings):
     def resolve_paths(cls, value: str) -> str:
         return str(resolve_project_path(value))
 
+    @field_validator('modbus_device_id', mode='before')
+    @classmethod
+    def empty_device_id_uses_profile(cls, value: int | str | None) -> int | str | None:
+        if isinstance(value, str) and value.strip() == '':
+            return None
+        return value
+
 
 settings = Settings()
