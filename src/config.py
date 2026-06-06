@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -49,6 +50,13 @@ class Settings(BaseSettings):
     @classmethod
     def resolve_paths(cls, value: str) -> str:
         return str(resolve_project_path(value))
+
+    @field_validator('modbus_device_id', mode='before')
+    @classmethod
+    def empty_device_id_uses_profile_default(cls, value: Any) -> Any:
+        if isinstance(value, str) and value.strip() == '':
+            return None
+        return value
 
 
 settings = Settings()

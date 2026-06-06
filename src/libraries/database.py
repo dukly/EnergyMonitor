@@ -164,12 +164,21 @@ class Database:
             )
 
         column_list = ', '.join(legacy_columns)
+        source_column_list = ', '.join(f'source.{column}' for column in legacy_columns)
+        duplicate_predicate = ' AND '.join(
+            f'target.{column} IS source.{column}' for column in legacy_columns
+        )
         self.cur.execute(f'''
             INSERT INTO measurements ({column_list})
-            SELECT {column_list}
-            FROM measurements_legacy
+            SELECT {source_column_list}
+            FROM measurements_legacy AS source
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM measurements AS target
+                WHERE {duplicate_predicate}
+            )
         ''')
-        return row_count
+        return int(self.cur.rowcount)
 
     def save_measurement(
         self,
