@@ -40,6 +40,13 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
+    @field_validator('modbus_device_id', mode='before')
+    @classmethod
+    def parse_optional_device_id(cls, value: object) -> object:
+        if isinstance(value, str) and value.strip() == '':
+            return None
+        return value
+
     @field_validator(
         'sqlite_database_path',
         'log_file_path',
