@@ -164,12 +164,24 @@ class Database:
             )
 
         column_list = ', '.join(legacy_columns)
+        duplicate_conditions = ' AND '.join(
+            (
+                f'(measurements.{column} = legacy.{column} OR '
+                f'(measurements.{column} IS NULL AND legacy.{column} IS NULL))'
+            )
+            for column in legacy_columns
+        )
         self.cur.execute(f'''
             INSERT INTO measurements ({column_list})
             SELECT {column_list}
-            FROM measurements_legacy
+            FROM measurements_legacy AS legacy
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM measurements
+                WHERE {duplicate_conditions}
+            )
         ''')
-        return row_count
+        return max(self.cur.rowcount, 0)
 
     def save_measurement(
         self,
