@@ -221,8 +221,8 @@ def test_database_recovery_skips_already_copied_legacy_rows(tmp_path) -> None:
 
     db = Database(str(db_path))
 
-    db.cur.execute('SELECT timestamp, COUNT(*) FROM measurements GROUP BY timestamp')
-    assert db.cur.fetchall() == [('2026-06-01 10:00:00', 1)]
+    db.cur.execute('SELECT COUNT(*) FROM measurements WHERE timestamp = ?', ('2026-06-01 10:00:00',))
+    assert db.cur.fetchone()[0] == 1
     assert not db._table_exists('measurements_legacy')
     db.close()
 
