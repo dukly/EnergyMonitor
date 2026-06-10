@@ -1,6 +1,7 @@
 import struct
 from unittest.mock import MagicMock
 
+from config import settings
 from libraries.modbus import ModbusClient
 
 
@@ -75,6 +76,32 @@ def test_read_registers_block_reads_in_chunks() -> None:
     assert chunk_calls[0] == (32000, 20, 'input')
     assert chunk_calls[1] == (32000, 10, 'input')
     assert chunk_calls[2] == (32010, 10, 'input')
+
+
+def test_read_registers_block_uses_safe_chunk_boundaries(monkeypatch) -> None:
+    monkeypatch.setattr(settings, 'modbus_read_chunk_size', 9)
+
+    client = ModbusClient('localhost', 502)
+    chunk_calls: list[tuple[int, int, str]] = []
+
+    def fake_chunk(start: int, count: int, kind: str) -> list[int] | None:
+        chunk_calls.append((start, count, kind))
+        if count == 20:
+            return None
+        return [0] * count
+
+    client._read_registers_chunk = fake_chunk  # type: ignore[method-assign]
+
+    registers = client.read_registers_block(32000, 20, register_kind='input')
+
+    assert registers is not None
+    assert len(registers) == 20
+    assert chunk_calls == [
+        (32000, 20, 'input'),
+        (32000, 8, 'input'),
+        (32008, 8, 'input'),
+        (32016, 4, 'input'),
+    ]
 
 
 def test_handler_closes_client_on_empty_measurement(tmp_path) -> None:
