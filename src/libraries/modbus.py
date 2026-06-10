@@ -163,7 +163,7 @@ class ModbusClient:
         if full_block is not None:
             return full_block
 
-        chunk_size = max(1, settings.modbus_read_chunk_size)
+        chunk_size = self._safe_chunk_size(settings.modbus_read_chunk_size)
         if count <= chunk_size:
             return None
 
@@ -182,6 +182,19 @@ class ModbusClient:
             offset += piece_count
 
         return merged
+
+    @staticmethod
+    def _safe_chunk_size(configured_chunk_size: int) -> int:
+        chunk_size = max(2, configured_chunk_size)
+        if chunk_size % 2 == 0:
+            return chunk_size
+
+        safe_chunk_size = chunk_size - 1
+        logger.warning(
+            'MODBUS_READ_CHUNK_SIZE must not split float32 register pairs; '
+            f'using {safe_chunk_size} instead of {configured_chunk_size}',
+        )
+        return safe_chunk_size
 
     def read_registers_block(
         self,
