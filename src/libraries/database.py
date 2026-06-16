@@ -164,12 +164,21 @@ class Database:
             )
 
         column_list = ', '.join(legacy_columns)
+        duplicate_checks = ' AND '.join(
+            f'current.{column} IS legacy.{column}'
+            for column in legacy_columns
+        )
         self.cur.execute(f'''
             INSERT INTO measurements ({column_list})
             SELECT {column_list}
-            FROM measurements_legacy
+            FROM measurements_legacy AS legacy
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM measurements AS current
+                WHERE {duplicate_checks}
+            )
         ''')
-        return row_count
+        return int(self.cur.rowcount)
 
     def save_measurement(
         self,
