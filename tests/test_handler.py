@@ -161,6 +161,87 @@ def test_database_recovers_interrupted_legacy_migration(tmp_path) -> None:
     db.close()
 
 
+def test_database_recovery_skips_already_copied_legacy_rows(tmp_path) -> None:
+    db_path = tmp_path / 'partial-copy.db'
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE measurements_legacy (
+            timestamp TEXT,
+            voltage_dc REAL,
+            current_dc REAL,
+            power_ac REAL,
+            temp REAL,
+            freq REAL,
+            pf REAL,
+            energy_total REAL,
+            energy_day REAL,
+            runtime REAL,
+            status INTEGER,
+            error INTEGER
+        )
+    ''')
+    cur.execute('''
+        CREATE TABLE measurements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            voltage_dc REAL,
+            current_dc REAL,
+            power_ac REAL,
+            temp REAL,
+            freq REAL,
+            pf REAL,
+            energy_total REAL,
+            energy_day REAL,
+            runtime REAL,
+            status INTEGER,
+            error INTEGER,
+            status_text TEXT,
+            error_text TEXT
+        )
+    ''')
+
+    already_copied = (
+        '2026-06-01 10:00:00',
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0,
+    )
+    not_yet_copied = (
+        '2026-06-01 10:01:00',
+        None, 20, 30, 40, 50, 60, 70, 80, 90, 1, 0,
+    )
+
+    for row in (already_copied, not_yet_copied):
+        cur.execute('''
+            INSERT INTO measurements_legacy (
+                timestamp, voltage_dc, current_dc, power_ac, temp, freq, pf,
+                energy_total, energy_day, runtime, status, error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', row)
+
+    cur.execute('''
+        INSERT INTO measurements (
+            timestamp, voltage_dc, current_dc, power_ac, temp, freq, pf,
+            energy_total, energy_day, runtime, status, error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', already_copied)
+    conn.commit()
+    conn.close()
+
+    db = Database(str(db_path))
+
+    db.cur.execute('SELECT COUNT(*) FROM measurements')
+    assert db.cur.fetchone()[0] == 2
+    db.cur.execute(
+        'SELECT COUNT(*) FROM measurements WHERE timestamp = ?',
+        ('2026-06-01 10:00:00',),
+    )
+    assert db.cur.fetchone()[0] == 1
+    db.cur.execute('SELECT voltage_dc FROM measurements WHERE timestamp = ?', ('2026-06-01 10:01:00',))
+    assert db.cur.fetchone()[0] is None
+    assert not db._table_exists('measurements_legacy')
+    db.close()
+
+
 def test_database_keeps_unsupported_legacy_schema_on_migration_failure(tmp_path) -> None:
     db_path = tmp_path / 'unsupported.db'
     conn = sqlite3.connect(db_path)
