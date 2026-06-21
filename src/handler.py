@@ -9,6 +9,7 @@ from status_labels import decode_error, decode_status
 
 
 def _is_empty_measurement(measurement: InverterMeasurement) -> bool:
+    # Status/error words alone do not prove that the telemetry block decoded correctly.
     return all(value is None for value in (
         measurement.voltage_dc,
         measurement.current_dc,
@@ -19,8 +20,6 @@ def _is_empty_measurement(measurement: InverterMeasurement) -> bool:
         measurement.energy_total,
         measurement.energy_day,
         measurement.runtime,
-        measurement.status,
-        measurement.error,
     ))
 
 
