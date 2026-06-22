@@ -19,8 +19,6 @@ def _is_empty_measurement(measurement: InverterMeasurement) -> bool:
         measurement.energy_total,
         measurement.energy_day,
         measurement.runtime,
-        measurement.status,
-        measurement.error,
     ))
 
 

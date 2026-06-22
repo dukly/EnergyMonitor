@@ -161,6 +161,74 @@ def test_database_recovers_interrupted_legacy_migration(tmp_path) -> None:
     db.close()
 
 
+def test_database_recovery_skips_rows_already_copied_before_interruption(tmp_path) -> None:
+    db_path = tmp_path / 'interrupted_after_copy.db'
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE measurements_legacy (
+            timestamp TEXT,
+            voltage_dc REAL,
+            current_dc REAL,
+            power_ac REAL,
+            temp REAL,
+            freq REAL,
+            pf REAL,
+            energy_total REAL,
+            energy_day REAL,
+            runtime REAL,
+            status INTEGER,
+            error INTEGER
+        )
+    ''')
+    cur.execute('''
+        CREATE TABLE measurements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            voltage_dc REAL,
+            current_dc REAL,
+            power_ac REAL,
+            temp REAL,
+            freq REAL,
+            pf REAL,
+            energy_total REAL,
+            energy_day REAL,
+            runtime REAL,
+            status INTEGER,
+            error INTEGER,
+            status_text TEXT,
+            error_text TEXT
+        )
+    ''')
+    cur.execute('''
+        INSERT INTO measurements_legacy (
+            timestamp, voltage_dc, current_dc, power_ac, temp, freq, pf,
+            energy_total, energy_day, runtime, status, error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        '2026-06-01 10:00:00',
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0,
+    ))
+    cur.execute('''
+        INSERT INTO measurements (
+            timestamp, voltage_dc, current_dc, power_ac, temp, freq, pf,
+            energy_total, energy_day, runtime, status, error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        '2026-06-01 10:00:00',
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0,
+    ))
+    conn.commit()
+    conn.close()
+
+    db = Database(str(db_path))
+
+    db.cur.execute('SELECT COUNT(*) FROM measurements WHERE timestamp = ?', ('2026-06-01 10:00:00',))
+    assert db.cur.fetchone()[0] == 1
+    assert not db._table_exists('measurements_legacy')
+    db.close()
+
+
 def test_database_keeps_unsupported_legacy_schema_on_migration_failure(tmp_path) -> None:
     db_path = tmp_path / 'unsupported.db'
     conn = sqlite3.connect(db_path)
@@ -219,4 +287,30 @@ def test_database_creates_parent_directory(tmp_path) -> None:
     db_path = tmp_path / 'nested' / 'data' / 'monitor.db'
     db = Database(str(db_path))
     assert db_path.exists()
+    db.close()
+
+
+def test_handle_measurement_skips_status_only_row(tmp_path) -> None:
+    db = Database(str(tmp_path / 'test.db'))
+    client = MagicMock(spec=ModbusClient)
+    client.read_measurement_block.return_value = InverterMeasurement(
+        voltage_dc=None,
+        current_dc=None,
+        power_ac=None,
+        temp=None,
+        freq=None,
+        pf=None,
+        energy_total=None,
+        energy_day=None,
+        runtime=None,
+        status=1,
+        error=0,
+    )
+
+    result = handle_measurement(db, client)
+
+    assert result is None
+    client.close.assert_called_once()
+    db.cur.execute('SELECT COUNT(*) FROM measurements')
+    assert db.cur.fetchone()[0] == 0
     db.close()
