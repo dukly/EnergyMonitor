@@ -33,7 +33,8 @@ if ($pipExitCode -ne 0) {
     throw "pip install failed with exit code $pipExitCode"
 }
 
-$action = New-ScheduledTaskAction -Execute "$InstallDir\venv\Scripts\python.exe" -Argument "$InstallDir\src\main.py" -WorkingDirectory $InstallDir
+$taskArgument = "`"$InstallDir\src\main.py`""
+$action = New-ScheduledTaskAction -Execute "$InstallDir\venv\Scripts\python.exe" -Argument $taskArgument -WorkingDirectory $InstallDir
 $trigger = New-ScheduledTaskTrigger -AtStartup
 Register-ScheduledTask -TaskName "EnergyMonitorAgent" -Action $action -Trigger $trigger -RunLevel Highest -Force
 
