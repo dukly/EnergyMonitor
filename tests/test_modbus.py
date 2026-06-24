@@ -93,3 +93,23 @@ def test_handler_closes_client_on_empty_measurement(tmp_path) -> None:
     assert result is None
     client.close.assert_called_once()
     db.close()
+
+
+def test_handler_treats_status_only_measurement_as_empty(tmp_path) -> None:
+    from handler import handle_measurement
+    from libraries.database import Database
+    from libraries.modbus import InverterMeasurement
+
+    db = Database(str(tmp_path / 'status_only.db'))
+    client = MagicMock(spec=ModbusClient)
+    client.read_measurement_block.return_value = InverterMeasurement(
+        None, None, None, None, None, None, None, None, None, 0, 0,
+    )
+
+    result = handle_measurement(db, client)
+
+    assert result is None
+    client.close.assert_called_once()
+    db.cur.execute('SELECT COUNT(*) FROM measurements')
+    assert db.cur.fetchone()[0] == 0
+    db.close()
