@@ -123,7 +123,7 @@ class Database:
 
         self.cur.execute('BEGIN IMMEDIATE')
         try:
-            copied_rows = self._copy_legacy_rows(columns)
+            copied_rows = self._copy_legacy_rows(columns, skip_existing=True)
             self.cur.execute('DROP TABLE measurements_legacy')
         except Exception:
             self.conn.rollback()
@@ -136,7 +136,7 @@ class Database:
         self.cur.execute('SELECT COUNT(*) FROM measurements_legacy')
         return int(self.cur.fetchone()[0])
 
-    def _copy_legacy_rows(self, source_columns: set[str]) -> int:
+    def _copy_legacy_rows(self, source_columns: set[str], skip_existing: bool = False) -> int:
         row_count = self._legacy_row_count()
         if row_count == 0:
             return 0
@@ -164,12 +164,28 @@ class Database:
             )
 
         column_list = ', '.join(legacy_columns)
+        selected_columns = ', '.join(f'legacy.{column}' for column in legacy_columns)
+        duplicate_filter = ''
+
+        if skip_existing:
+            comparisons = ' AND '.join(
+                f'target.{column} IS legacy.{column}' for column in legacy_columns
+            )
+            duplicate_filter = f'''
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM measurements AS target
+                    WHERE {comparisons}
+                )
+            '''
+
         self.cur.execute(f'''
             INSERT INTO measurements ({column_list})
-            SELECT {column_list}
-            FROM measurements_legacy
+            SELECT {selected_columns}
+            FROM measurements_legacy AS legacy
+            {duplicate_filter}
         ''')
-        return row_count
+        return int(self.cur.rowcount)
 
     def save_measurement(
         self,
