@@ -205,6 +205,7 @@ def test_database_adds_missing_columns_when_id_exists(tmp_path) -> None:
             error INTEGER
         )
     ''')
+    cur.execute('INSERT INTO measurements (timestamp, voltage_dc) VALUES (?, ?)', ('old', 230))
     conn.commit()
     conn.close()
 
@@ -212,6 +213,14 @@ def test_database_adds_missing_columns_when_id_exists(tmp_path) -> None:
     columns = {row[1] for row in db.cur.execute('PRAGMA table_info(measurements)').fetchall()}
     assert 'status_text' in columns
     assert 'error_text' in columns
+    row_id = db.save_measurement('new', *([1.0] * 9), status=1, error=0)
+    assert row_id == 2
+    assert db.cur.execute('SELECT voltage_dc, current_dc FROM measurements WHERE id=1').fetchone()[:] == (230, None)
+    assert db.cur.execute('SELECT current_dc FROM measurements WHERE id=2').fetchone()[0] == 1
+    db.close()
+
+    db = Database(str(db_path))
+    assert db.cur.execute('SELECT COUNT(*) FROM measurements').fetchone()[0] == 2
     db.close()
 
 

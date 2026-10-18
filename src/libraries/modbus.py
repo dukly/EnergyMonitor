@@ -1,3 +1,4 @@
+import math
 import struct
 from dataclasses import dataclass
 
@@ -84,8 +85,8 @@ class ModbusClient:
     def _decode_float32(high_register: int, low_register: int) -> float:
         raw = (high_register << 16) | low_register
         value = struct.unpack('>f', raw.to_bytes(4, byteorder='big'))[0]
-        if value != value:  # NaN
-            raise struct.error('decoded NaN')
+        if not math.isfinite(value):
+            raise struct.error('decoded non-finite float')
         return value
 
     def _register_kinds_to_try(self, register_kind: str) -> list[str]:

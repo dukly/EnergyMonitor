@@ -8,12 +8,12 @@ from libraries.modbus import ModbusClient
 from logger import logger
 
 
-def main() -> None:
+def main() -> int:
     try:
         profile = get_profile(settings.inverter_profile)
     except ValueError as error:
         logger.error(str(error))
-        return
+        return 1
 
     logger.info(f'Starting {settings.app_name} (profile={profile.name})...')
 
@@ -25,35 +25,26 @@ def main() -> None:
         logger.info(f'Connected to SQLite: {settings.sqlite_database_path}')
     except Exception as error:
         logger.error(f'Failed to initialize database: {error}', exc_info=True)
-        return
+        return 1
 
     device_id = (
         settings.modbus_device_id
         if settings.modbus_device_id is not None
         else profile.device_id
     )
-    client = ModbusClient(
-        settings.modbus_host,
-        settings.modbus_port,
-        device_id=device_id,
-    )
-
-    try:
-        client.connect()
-        logger.info(f'Connected to Modbus at {settings.modbus_host}:{settings.modbus_port}')
-    except Exception as error:
-        logger.error(f'Failed to connect to Modbus: {error}', exc_info=True)
-        db.close()
-        return
-
     logger.info(f'Polling interval: {settings.modbus_poll_interval} seconds')
 
     try:
+        client = ModbusClient(
+            settings.modbus_host,
+            settings.modbus_port,
+            device_id=device_id,
+        )
         while True:
             try:
                 handle_measurement(db, client)
             except (ConnectionError, OSError) as error:
-                logger.error(f'Modbus connection lost: {error}. Retrying on next cycle.', exc_info=True)
+                logger.error(f'Modbus unavailable: {error}. Retrying on next cycle.', exc_info=True)
                 client.close()
             except Exception as error:
                 logger.error(f'Error during measurement handling: {error}', exc_info=True)
@@ -62,6 +53,10 @@ def main() -> None:
 
     except KeyboardInterrupt:
         logger.info(f'Stopping {settings.app_name} (Ctrl+C pressed)')
+
+    except Exception as error:
+        logger.error(f'Agent failed: {error}', exc_info=True)
+        return 1
 
     finally:
         if client is not None:
@@ -75,6 +70,8 @@ def main() -> None:
             db.close()
             logger.info('Database connection closed')
 
+    return 0
+
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

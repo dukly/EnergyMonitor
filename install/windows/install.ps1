@@ -7,11 +7,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+. (Join-Path $PSScriptRoot 'functions.ps1')
+$InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 
 Write-Host "Installing EnergyMonitor agent to $InstallDir"
-
-New-Item -ItemType Directory -Force -Path $InstallDir, "$InstallDir\logs", "$InstallDir\data" | Out-Null
-Copy-Item -Recurse -Force "$RepoRoot\src" "$InstallDir\src"
 
 $envContent = @"
 MODBUS_HOST=$ModbusHost
@@ -21,9 +20,12 @@ SQLITE_DATABASE_PATH=data/monitor.db
 LOG_FILE_PATH=logs/monitor.log
 ERROR_LOG_FILE_PATH=logs/error.log
 "@
-Set-Content -Path "$InstallDir\.env" -Value $envContent -Encoding UTF8
+Initialize-AgentFiles -SourceRoot $RepoRoot -InstallDir $InstallDir -EnvContent $envContent
 
 python -m venv "$InstallDir\venv"
+if ($LASTEXITCODE -ne 0) {
+    throw "venv creation failed with exit code $LASTEXITCODE"
+}
 $previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 & "$InstallDir\venv\Scripts\pip.exe" install -r "$InstallDir\src\requirements.txt" --disable-pip-version-check
@@ -33,8 +35,6 @@ if ($pipExitCode -ne 0) {
     throw "pip install failed with exit code $pipExitCode"
 }
 
-$action = New-ScheduledTaskAction -Execute "$InstallDir\venv\Scripts\python.exe" -Argument "$InstallDir\src\main.py" -WorkingDirectory $InstallDir
-$trigger = New-ScheduledTaskTrigger -AtStartup
-Register-ScheduledTask -TaskName "EnergyMonitorAgent" -Action $action -Trigger $trigger -RunLevel Highest -Force
+Register-AgentTask -InstallDir $InstallDir
 
 Write-Host "Done. Start with: Start-ScheduledTask -TaskName EnergyMonitorAgent"

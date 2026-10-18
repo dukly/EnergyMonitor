@@ -8,13 +8,16 @@ echo "Installing EnergyMonitor agent to ${INSTALL_DIR}"
 
 sudo mkdir -p "${INSTALL_DIR}"
 sudo cp -r "${REPO_ROOT}/src" "${INSTALL_DIR}/"
-sudo cp "${REPO_ROOT}/.env.example" "${INSTALL_DIR}/.env" 2>/dev/null || true
+if ! sudo test -e "${INSTALL_DIR}/.env"; then
+  sudo cp "${REPO_ROOT}/.env.example" "${INSTALL_DIR}/.env"
+fi
 
 cd "${INSTALL_DIR}"
 sudo python3 -m venv venv
 sudo ./venv/bin/pip install -r src/requirements.txt
 
-sudo cp "${REPO_ROOT}/install/gateway/energy-monitor-agent.service" /etc/systemd/system/
+sudo python3 "${REPO_ROOT}/install/gateway/render_service.py" \
+  "${INSTALL_DIR}" /etc/systemd/system/energy-monitor-agent.service
 sudo systemctl daemon-reload
 sudo systemctl enable energy-monitor-agent
 

@@ -4,6 +4,17 @@ from pathlib import Path
 from logger import logger
 
 SCHEMA_COLUMNS: dict[str, str] = {
+    'voltage_dc': 'REAL',
+    'current_dc': 'REAL',
+    'power_ac': 'REAL',
+    'temp': 'REAL',
+    'freq': 'REAL',
+    'pf': 'REAL',
+    'energy_total': 'REAL',
+    'energy_day': 'REAL',
+    'runtime': 'REAL',
+    'status': 'INTEGER',
+    'error': 'INTEGER',
     'status_text': 'TEXT',
     'error_text': 'TEXT',
 }
@@ -36,14 +47,15 @@ class Database:
         self.conn = sqlite3.connect(self.database_path)
         self.conn.row_factory = sqlite3.Row
         self.cur = self.conn.cursor()
-        self._initialize_database()
+        try:
+            self._initialize_database()
+        except Exception:
+            self.conn.close()
+            raise
 
     def _initialize_database(self) -> None:
         self._create_measurements_table()
         self.conn.commit()
-
-        if self._table_exists('measurements_legacy'):
-            self._recover_legacy_table()
 
         columns = self._table_columns()
 
@@ -52,6 +64,9 @@ class Database:
             columns = self._table_columns()
 
         self._ensure_columns(columns)
+
+        if self._table_exists('measurements_legacy'):
+            self._recover_legacy_table()
 
         self.cur.execute('''
             CREATE INDEX IF NOT EXISTS idx_measurements_timestamp
@@ -94,12 +109,19 @@ class Database:
         return {row[1] for row in self.cur.fetchall()}
 
     def _ensure_columns(self, columns: set[str]) -> None:
-        for column_name, column_type in SCHEMA_COLUMNS.items():
-            if column_name in columns:
-                continue
-            self.cur.execute(f'ALTER TABLE measurements ADD COLUMN {column_name} {column_type}')
-            self.conn.commit()
-            logger.info(f'Added missing column: {column_name}')
+        if 'timestamp' not in columns:
+            raise RuntimeError('Cannot use measurements table without a timestamp column; source data is unchanged.')
+        info = self.cur.execute('PRAGMA table_info(measurements)').fetchall()
+        primary_keys = [row for row in info if row[5]]
+        if len(primary_keys) != 1 or primary_keys[0][1] != 'id' or primary_keys[0][2].upper() != 'INTEGER':
+            raise RuntimeError('measurements.id must be an INTEGER PRIMARY KEY; source data is unchanged.')
+        with self.conn:
+            self.cur.execute('BEGIN IMMEDIATE')
+            for column_name, column_type in SCHEMA_COLUMNS.items():
+                if column_name in columns:
+                    continue
+                self.cur.execute(f'ALTER TABLE measurements ADD COLUMN {column_name} {column_type}')
+                logger.info(f'Added missing column: {column_name}')
 
     def _migrate_legacy_table(self, columns: set[str]) -> None:
         logger.info('Migrating legacy measurements table to the new schema')

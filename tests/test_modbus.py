@@ -1,7 +1,15 @@
 import struct
 from unittest.mock import MagicMock
 
+import pytest
+
 from libraries.modbus import ModbusClient
+
+
+@pytest.mark.parametrize('high', [0x7f80, 0xff80, 0x7fc0])
+def test_nonfinite_measurement_is_not_saved_as_a_number(high):
+    client = ModbusClient('localhost', 502)
+    assert client.read_float32([high, 0], 0, 32000) is None
 
 
 def test_decode_float32() -> None:
