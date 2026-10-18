@@ -19,8 +19,6 @@ def _is_empty_measurement(measurement: InverterMeasurement) -> bool:
         measurement.energy_total,
         measurement.energy_day,
         measurement.runtime,
-        measurement.status,
-        measurement.error,
     ))
 
 
@@ -42,7 +40,7 @@ def handle_measurement(db: Database, client: ModbusClient) -> int | None:
 
     if _is_empty_measurement(measurement):
         logger.error(
-            'All Modbus values are empty (no valid register block). '
+            'All numeric Modbus values are empty (no valid telemetry). '
             'Closing connection for reconnect on next cycle.',
         )
         client.close()

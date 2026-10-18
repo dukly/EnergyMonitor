@@ -319,3 +319,32 @@ def test_database_creates_parent_directory(tmp_path) -> None:
     db = Database(str(db_path))
     assert db_path.exists()
     db.close()
+
+
+@pytest.mark.parametrize('status,error', [(1, 0), (3, 5), (0, 0)])
+def test_status_only_telemetry_is_not_saved(tmp_path, status, error) -> None:
+    db = Database(str(tmp_path / 'status-only.db'))
+    client = MagicMock(spec=ModbusClient)
+    client.read_measurement_block.return_value = InverterMeasurement(
+        *([None] * 9), status=status, error=error,
+    )
+    try:
+        assert handle_measurement(db, client) is None
+        client.close.assert_called_once()
+        assert db.cur.execute('SELECT COUNT(*) FROM measurements').fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_zero_numeric_telemetry_is_saved(tmp_path) -> None:
+    db = Database(str(tmp_path / 'zero.db'))
+    client = MagicMock(spec=ModbusClient)
+    client.read_measurement_block.return_value = InverterMeasurement(
+        *([0.0] * 9), status=0, error=0,
+    )
+    try:
+        assert handle_measurement(db, client) == 1
+        client.close.assert_not_called()
+        assert db.cur.execute('SELECT power_ac FROM measurements').fetchone()[0] == 0
+    finally:
+        db.close()
