@@ -10,6 +10,72 @@ from libraries.modbus import InverterMeasurement, ModbusClient
 from status_labels import decode_error, decode_status
 
 
+LEGACY_MEASUREMENT_COLUMNS = (
+    'timestamp',
+    'voltage_dc',
+    'current_dc',
+    'power_ac',
+    'temp',
+    'freq',
+    'pf',
+    'energy_total',
+    'energy_day',
+    'runtime',
+    'status',
+    'error',
+)
+
+
+def _create_legacy_measurements_table(cur, table_name: str) -> None:
+    cur.execute(f'''
+        CREATE TABLE {table_name} (
+            timestamp TEXT,
+            voltage_dc REAL,
+            current_dc REAL,
+            power_ac REAL,
+            temp REAL,
+            freq REAL,
+            pf REAL,
+            energy_total REAL,
+            energy_day REAL,
+            runtime REAL,
+            status INTEGER,
+            error INTEGER
+        )
+    ''')
+
+
+def _create_current_measurements_table(cur) -> None:
+    cur.execute('''
+        CREATE TABLE measurements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            voltage_dc REAL,
+            current_dc REAL,
+            power_ac REAL,
+            temp REAL,
+            freq REAL,
+            pf REAL,
+            energy_total REAL,
+            energy_day REAL,
+            runtime REAL,
+            status INTEGER,
+            error INTEGER,
+            status_text TEXT,
+            error_text TEXT
+        )
+    ''')
+
+
+def _insert_measurement(cur, table_name: str, row: tuple[object, ...]) -> None:
+    columns = ', '.join(LEGACY_MEASUREMENT_COLUMNS)
+    placeholders = ', '.join('?' for _ in LEGACY_MEASUREMENT_COLUMNS)
+    cur.execute(
+        f'INSERT INTO {table_name} ({columns}) VALUES ({placeholders})',
+        row,
+    )
+
+
 def test_decode_status_and_error() -> None:
     assert decode_status(1) == 'Нормальная работа'
     assert decode_error(0) == 'Нет ошибки'
@@ -94,56 +160,13 @@ def test_database_recovers_interrupted_legacy_migration(tmp_path) -> None:
     db_path = tmp_path / 'interrupted.db'
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
-    cur.execute('''
-        CREATE TABLE measurements_legacy (
-            timestamp TEXT,
-            voltage_dc REAL,
-            current_dc REAL,
-            power_ac REAL,
-            temp REAL,
-            freq REAL,
-            pf REAL,
-            energy_total REAL,
-            energy_day REAL,
-            runtime REAL,
-            status INTEGER,
-            error INTEGER
-        )
-    ''')
-    cur.execute('''
-        CREATE TABLE measurements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT NOT NULL,
-            voltage_dc REAL,
-            current_dc REAL,
-            power_ac REAL,
-            temp REAL,
-            freq REAL,
-            pf REAL,
-            energy_total REAL,
-            energy_day REAL,
-            runtime REAL,
-            status INTEGER,
-            error INTEGER,
-            status_text TEXT,
-            error_text TEXT
-        )
-    ''')
-    cur.execute('''
-        INSERT INTO measurements_legacy (
-            timestamp, voltage_dc, current_dc, power_ac, temp, freq, pf,
-            energy_total, energy_day, runtime, status, error
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
+    _create_legacy_measurements_table(cur, 'measurements_legacy')
+    _create_current_measurements_table(cur)
+    _insert_measurement(cur, 'measurements_legacy', (
         '2026-06-01 10:00:00',
         1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0,
     ))
-    cur.execute('''
-        INSERT INTO measurements (
-            timestamp, voltage_dc, current_dc, power_ac, temp, freq, pf,
-            energy_total, energy_day, runtime, status, error
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
+    _insert_measurement(cur, 'measurements', (
         '2026-06-01 10:01:00',
         10, 20, 30, 40, 50, 60, 70, 80, 90, 1, 0,
     ))
@@ -158,6 +181,73 @@ def test_database_recovers_interrupted_legacy_migration(tmp_path) -> None:
 
     db.cur.execute('SELECT voltage_dc FROM measurements WHERE timestamp = ?', ('2026-06-01 10:00:00',))
     assert db.cur.fetchone()[0] == 1
+    db.close()
+
+
+def test_database_recovery_does_not_duplicate_already_copied_legacy_rows(tmp_path) -> None:
+    db_path = tmp_path / 'already_copied.db'
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    _create_legacy_measurements_table(cur, 'measurements_legacy')
+    _create_current_measurements_table(cur)
+    rows = [
+        ('2026-06-01 10:00:00', 1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0),
+        ('2026-06-01 10:01:00', 10, 20, 30, 40, 50, 60, 70, 80, 90, 1, 0),
+    ]
+    for row in rows:
+        _insert_measurement(cur, 'measurements_legacy', row)
+        _insert_measurement(cur, 'measurements', row)
+    conn.commit()
+    conn.close()
+
+    db = Database(str(db_path))
+
+    db.cur.execute('SELECT COUNT(*) FROM measurements')
+    assert db.cur.fetchone()[0] == 2
+    assert not db._table_exists('measurements_legacy')
+
+    db.cur.execute('''
+        SELECT timestamp, voltage_dc, COUNT(*)
+        FROM measurements
+        GROUP BY timestamp, voltage_dc
+        ORDER BY timestamp
+    ''')
+    rows_after_recovery = [tuple(row) for row in db.cur.fetchall()]
+    assert rows_after_recovery == [
+        ('2026-06-01 10:00:00', 1, 1),
+        ('2026-06-01 10:01:00', 10, 1),
+    ]
+    db.close()
+
+
+def test_database_recovery_copies_missing_duplicate_legacy_instances(tmp_path) -> None:
+    db_path = tmp_path / 'partial_duplicate.db'
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    _create_legacy_measurements_table(cur, 'measurements_legacy')
+    _create_current_measurements_table(cur)
+    duplicate_row = (
+        '2026-06-01 10:00:00',
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0,
+    )
+    _insert_measurement(cur, 'measurements_legacy', duplicate_row)
+    _insert_measurement(cur, 'measurements_legacy', duplicate_row)
+    _insert_measurement(cur, 'measurements', duplicate_row)
+    conn.commit()
+    conn.close()
+
+    db = Database(str(db_path))
+
+    db.cur.execute('SELECT COUNT(*) FROM measurements')
+    assert db.cur.fetchone()[0] == 2
+    assert not db._table_exists('measurements_legacy')
+
+    db.cur.execute('''
+        SELECT COUNT(*)
+        FROM measurements
+        WHERE timestamp = ? AND voltage_dc = ?
+    ''', ('2026-06-01 10:00:00', 1))
+    assert db.cur.fetchone()[0] == 2
     db.close()
 
 
